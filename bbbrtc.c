@@ -44,6 +44,9 @@
 #define RTC_INTERRUPTS_IT_ALARM	 (1<<3)		// Enable interrupt on ALARM
 #define RTC_INTERRUPTS_IT_TIMER	 (1<<2)		// Enable interrupt on TIMER
 
+#define RTC_REVISION			0x74		// Chip revision code
+#define RTC_REVISION_MAGIC		0x4eb01106U // Expected value
+
 #define RTC_SYSCONFIG			0x78
 #define RTC_IRQWAKEEN			0x7c
 #define RTC_IRQWAKEEN_ALARM		(1<<1)		// Allow wakeup generation on ALARM
@@ -241,7 +244,7 @@ const char *clock_choice_name( clock_choice_t clock_choice ) {
 		
 }
 
-
+int dumpflag=0;		// Are we doing a dump?
 
 int main(int argc, char **argv) {
 		
@@ -258,7 +261,9 @@ int main(int argc, char **argv) {
 			clock_choice = SLEEP;
 		} else if (!strcasecmp( argv[1] , "wake" )) {
 			clock_choice = WAKE;
-		} 
+		} else if (!strcasecmp( argv[1] , "dump" )) {
+			dumpflag=1;
+		}
 		
 		if (argc>= 3 ) {
 			
@@ -269,7 +274,7 @@ int main(int argc, char **argv) {
 	}
 	
 	
-	if ( clock_choice == NONE ) {			// Bad params
+	if ( clock_choice == NONE && !dumpflag ) {			// Bad params
 	
 			showhelp();
 			
@@ -330,47 +335,63 @@ int main(int argc, char **argv) {
 					
 				} while (0);
 				
+				diagprint("Checking RTC chip rev...");
 				
-				if (new_time) {			// Are we setting a new time?
-				
-					diagprint( "Setting %s to %u...\n",clock_choice_name( clock_choice) , new_time );									
-					settime( base , clock_choice_off( clock_choice) , new_time );
-					diagprint( "set.\n");
-
+				if ( get32reg( base , RTC_REVISION ) != RTC_REVISION_MAGIC ) {
 					
-					if ( clock_choice == SLEEP ) {
-						
-						diagprint( "Enable PWR_ENABLE_EN to be controlled ON->OFF by ALARM2...\n");							
-						set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN );
-						diagprint( "enabled.\n");
+					diagprint("WARNING: The revision on the RTC is %x, should be %x\n" , get32reg( base , RTC_REVISION ) , RTC_REVISION_MAGIC  );
+					diagprint("This program is only expected to work on an AM355x processor!\n");					
+				} else {
+					diagprint("checks good.");				
+				}
+				
+				
+				if (dumpflag) {
+					
+					dump(base);
+					
+				} else {
+				
+					if (new_time) {			// Are we setting a new time?
+					
+						diagprint( "Setting %s to %u...\n",clock_choice_name( clock_choice) , new_time );									
+						settime( base , clock_choice_off( clock_choice) , new_time );
+						diagprint( "set.\n");
 
-						diagprint( " Enable ALARM2 interrupt bit... \n");							
-						set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM2 );
-						diagprint( "enabled.\n");
 						
-						
-					} else if (clock_choice == WAKE ) {
-						
-						diagprint( "Enable PWR_ENABLE_EN to be controlled OFF->ON by ALARM...\n");														
-						set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN );
-						diagprint( "enabled.\n");
+						if ( clock_choice == SLEEP ) {
+							
+							diagprint( "Enable PWR_ENABLE_EN to be controlled ON->OFF by ALARM2...\n");							
+							set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN );
+							diagprint( "enabled.\n");
 
-						diagprint( " Enable ALARM interrupt bit... \n");							
-						set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM );
-						diagprint( "enabled.\n");
+							diagprint( " Enable ALARM2 interrupt bit... \n");							
+							set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM2 );
+							diagprint( "enabled.\n");
+							
+							
+						} else if (clock_choice == WAKE ) {
+							
+							diagprint( "Enable PWR_ENABLE_EN to be controlled OFF->ON by ALARM...\n");														
+							set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN );
+							diagprint( "enabled.\n");
 
-						diagprint( " Enable IRQ WAKE ENABLE bit... \n");													
-						set32reg( base , RTC_IRQWAKEEN , RTC_IRQWAKEEN_ALARM );
-						diagprint( "enabled.\n");							
+							diagprint( " Enable ALARM interrupt bit... \n");							
+							set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM );
+							diagprint( "enabled.\n");
+
+							diagprint( " Enable IRQ WAKE ENABLE bit... \n");													
+							set32reg( base , RTC_IRQWAKEEN , RTC_IRQWAKEEN_ALARM );
+							diagprint( "enabled.\n");							
+							
+						}
 						
 					}
-					
+
+					diagprint( "Reading %s and printing to stdout...\n",clock_choice_name( clock_choice)  );									
+					printf( "%u\n" , gettime( base , clock_choice_off( clock_choice) ) );
+					diagprint( "done.\n");
 				}
-
-				diagprint( "Reading %s and printing to stdout...\n",clock_choice_name( clock_choice)  );									
-				printf( "%u\n" , gettime( base , clock_choice_off( clock_choice) ) );
-				diagprint( "done.\n");
-
 				
 				diagprint( "Restarting RTC...");
 				
