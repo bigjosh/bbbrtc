@@ -118,7 +118,7 @@ void diagprint( const char *fmt, ... ) {
 
     va_start(myargs, fmt);
 
-    //fprintf( stderr , "bbbrtc:");
+    //fprintf( stderr , "bbbrtc:"); 
 	
     /* Forward the '...' to vprintf */
     vfprintf( stderr , fmt, myargs);
@@ -130,17 +130,29 @@ void diagprint( const char *fmt, ... ) {
     va_end(myargs);	
 }
 
+// Directly print the BCD registers for debuging
+
+void printtimeregs( unsigned char *base, unsigned char time_offset  ) {
+	printf("sec   %3.3x\n" , get32reg( base , time_offset + TM_SECONDS_OFF ) );
+	printf("min   %3.3x\n" , get32reg( base , time_offset + TM_MINUTES_OFF ) );
+	printf("hour  %3.3x\n" , get32reg( base , time_offset + TM_HOURS_OFF ) );
+	printf("day   %3.3x\n" , get32reg( base , time_offset + TM_DAYS_OFF ) );
+	printf("month %3.3x\n" , get32reg( base , time_offset + TM_HOURS_OFF ) );
+	printf("year  %3.3x\n" , get32reg( base , time_offset + TM_YEARS_OFF ) );
+	
+}
+
 
 unsigned gettime( unsigned char *base, unsigned char time_offset ) {
 	
 	struct tm time;
 	
-	time.tm_sec   = get32reg( base , time_offset + TM_SECONDS_OFF );
-	time.tm_min   = get32reg( base , time_offset + TM_MINUTES_OFF );
-	time.tm_hour  = get32reg( base , time_offset + TM_HOURS_OFF );
-	time.tm_mday  = get32reg( base , time_offset + TM_DAYS_OFF );
-	time.tm_mon   = get32reg( base , time_offset + TM_MONTHS_OFF );
-	time.tm_year  = get32reg( base , time_offset + TM_YEARS_OFF ) + 100;	// Assume we are in the 2000's not 1900's (RTC only has 2 year digits)
+	time.tm_sec   = bcd2n( get32reg( base , time_offset + TM_SECONDS_OFF ));
+	time.tm_min   = bcd2n( get32reg( base , time_offset + TM_MINUTES_OFF ));
+	time.tm_hour  = bcd2n( get32reg( base , time_offset + TM_HOURS_OFF ));
+	time.tm_mday  = bcd2n( get32reg( base , time_offset + TM_DAYS_OFF ));
+	time.tm_mon   = bcd2n( get32reg( base , time_offset + TM_MONTHS_OFF ));
+	time.tm_year  = bcd2n( get32reg( base , time_offset + TM_YEARS_OFF ) )+ 100;	// Assume we are in the 2000's not 1900's (RTC only has 2 year digits)
 	
 	time_t readtime = mktime(&time);
 	
@@ -156,13 +168,15 @@ void settime( unsigned char *base, unsigned char time_offset , time_t newtime ) 
 	struct tm *time = gmtime( &newtime );
 		
 	diagprint( "setting:%s\n", ctime(&newtime));
+	
+	diagprint(" tmyear = %d\n " , time->tm_year  );
 		
-	set32reg( base , time_offset + TM_SECONDS_OFF , time->tm_sec   );
-	set32reg( base , time_offset + TM_MINUTES_OFF , time->tm_min);
-	set32reg( base , time_offset + TM_HOURS_OFF , time->tm_hour );
-	set32reg( base , time_offset + TM_DAYS_OFF , time->tm_mday   );
-	set32reg( base , time_offset + TM_MONTHS_OFF , time->tm_mon);
-	set32reg( base , time_offset + TM_YEARS_OFF , time->tm_year % 100) ;	//  (RTC only has 2 year digits)
+	set32reg( base , time_offset + TM_SECONDS_OFF , n2bcd(time->tm_sec    ));
+	set32reg( base , time_offset + TM_MINUTES_OFF , n2bcd( time->tm_min   ));
+	set32reg( base , time_offset + TM_HOURS_OFF   , n2bcd( time->tm_hour  ));
+	set32reg( base , time_offset + TM_DAYS_OFF    , n2bcd( time->tm_mday  ));
+	set32reg( base , time_offset + TM_MONTHS_OFF  , n2bcd( time->tm_mon   ));
+	set32reg( base , time_offset + TM_YEARS_OFF   , n2bcd( time->tm_year % 100)) ;	//  (RTC only has 2 year digits)
 
 	
 }
@@ -342,7 +356,7 @@ int main(int argc, char **argv) {
 					diagprint("WARNING: The revision on the RTC is %x, should be %x\n" , get32reg( base , RTC_REVISION ) , RTC_REVISION_MAGIC  );
 					diagprint("This program is only expected to work on an AM355x processor!\n");					
 				} else {
-					diagprint("checks good.");				
+					diagprint("checks good.\n");				
 				}
 				
 				
@@ -351,13 +365,17 @@ int main(int argc, char **argv) {
 					dump(base);
 					
 				} else {
+					
+					printtimeregs( base , clock_choice_off(clock_choice ) );
 				
 					if (new_time) {			// Are we setting a new time?
 					
-						diagprint( "Setting %s to %u...\n",clock_choice_name( clock_choice) , new_time );									
+						diagprint( "Setting %s to %u...",clock_choice_name( clock_choice) , new_time );									
 						settime( base , clock_choice_off( clock_choice) , new_time );
 						diagprint( "set.\n");
-
+						
+						printtimeregs( base , clock_choice_off(clock_choice ) );
+						
 						
 						if ( clock_choice == SLEEP ) {
 							
