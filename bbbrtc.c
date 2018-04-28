@@ -1,4 +1,13 @@
 
+/*
+
+	bbbrtc.c
+	
+	A utility for accessing the Real Time Clock inside the AM355x processor on the Beagle Bone Black computer.
+	(c)2018 Josh Levine. http://josh.com
+	
+*/
+
 
 #define RTC_SS_BASE 0x44e3e000L				// Memory base for the RTC registers
 
@@ -144,6 +153,71 @@ int main(int argc, char **argv) {
 			fflush(stdout);
 
 			unsigned char *base = (unsigned char *) map_base;
+			
+			if (argc < 2 ) {
+				
+				printf("Usage:\n");
+				printf("   rtcbb (sleep|wake|now) (get|set <time>) \n");
+				printf("Where:\n");
+				printf("   set sets the specified value to <time>\n")
+				printf("   get prints the specified value to stdout\n");
+				printf("   all times are in seconds since epoch\n");
+				printd("Notes:")
+				printf("   wake should always be later than sleep\n");
+				printf("   if you sleep without setting a wake then you must push the power button to wake\n");
+				printf("   use 'bbbrtc dump` to dump the contents of all registers to stdout\n")
+				printf("times:\n");
+				printf("   always specified in seconds since the epoch Jan 1, 1970\n");
+				printf("examples:\n");
+				printf("   set the rtc to the current system clock time...\n");
+				printf("      rtcbbb now set $(date +%%s)\n");
+				printf("   set the system clock to the current rtc time...\n");
+				printf("      date $(rtcbbb now get)\n");
+				printf("   set to sleep 10 seconds from now...\n");
+				printf("      rtcbbb sleep set $(date +%%s -d=\"$(rtcbbb now get)+(10 sec)\")\n");
+				printf("   set to wake 6 months after we go to sleep ...\n");
+				printf("      rtcbbb wake set $(date +%%s -d=\"$(rtcbbb sleep get)+(6 month)\")\n");
+				printf("notes:\n");
+				printf("   if you want to be able to wake from sleeping, you must turn off the 'off' bit\n");
+				printf("   in the PMIC controller with this command before sleeping..\n");
+				printf("   i2cset -f -y 0 0x24 0x0a 0x00\n");
+				
+			} else if ( argc == 2 && stricmp( argv[1] , "dump" ) {
+				
+				dump(base);
+				
+			} else {
+				 
+				int time_offset; 
+				
+				int dest_set =0;
+				
+				if ( stricmp( argv[1] , "now" ) ){
+					time_offset = RTC_CURRENT_TIME_TM;
+					dest_set=1;
+				} else if ( stricmp( argv[1] , "sleep") ) {
+					time_offset = RTC_ALARM2_TIME_TM;
+					dest_set=1;					
+				} else if ( stricmp( argv[1] , "wake") ) {
+					time_offset = RTC_ALARM_TIME_TM;
+					dest_set=1;					
+				} 
+				
+				if (!dest_set) {
+					printf("invalid destination, must be now,sleep, or wake.");					
+				} else {
+					
+					if (argc==3 && stricmp( argv[2] , "get")) {
+						
+						printf("%u\n" , gettime( base. time_offset );
+						
+					}
+					
+				}
+				
+			}
+			
+			
 			
 			printf("Value at address %d\n", *base );
 			fflush(stdout);
