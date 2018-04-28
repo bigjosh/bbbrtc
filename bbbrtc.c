@@ -11,35 +11,24 @@
 
 #define RTC_SS_BASE 0x44e3e000L				// Memory base for the RTC registers
 
+// There are three different time "records" in the RTC that follow the same format
 
 #define RTC_CURRENT_TIME_TM		0x00		// Offset to the current time registers
 
-#define SECONDS_REG 			0x00
-#define MINUTES_REG				0x04
-#define HOURS_REG				0x08
-#define DAYS_REG				0x0C
-#define MONTHS_REG 				0x10
-#define YEARS_REG				0x14
-
-
 #define RTC_ALARM_TIME_TM		0x20		// Offset to the alarm time registers (wake time)
-
-#define ALARM_SECONDS_REG 		0x20
-#define ALARM_MINUTES_REG		0x24
-#define ALARM_HOURS_REG			0x28
-#define ALARM_DAYS_REG			0x2C
-#define ALARM_MONTHS_REG 		0x30
-#define ALARM_YEARS_REG			0x34
-
 
 #define RTC_ALARM2_TIME_TM		0x80		// Offset to the alarm2 time registers (sleep time)
 
-#define ALARM2_SECONDS_REG 		0x80
-#define ALARM2_MINUTES_REG		0x84
-#define ALARM2_HOURS_REG		0x88
-#define ALARM2_DAYS_REG			0x8C
-#define ALARM2_MONTHS_REG 		0x90
-#define ALARM2_YEARS_REG		0x94
+
+// Offsets into the fields of a time record
+
+#define TM_SECONDS_OFF 			0x20
+#define TM_MINUTES_OFF			0x24
+#define TM_HOURS_OFF			0x28
+#define TM_DAYS_OFF				0x2C
+#define TM_MONTHS_OFF 			0x30
+#define TM_YEARS_OFF			0x34
+
 
 #define RTCALARMINT 			76			// RTC alarm interrupt
 
@@ -119,127 +108,168 @@ unsigned get32reg( unsigned char *base , unsigned char off) {
 }
 
 
-int main(int argc, char **argv) {
-    int fd;
-    void *map_base, *virt_addr;
-    unsigned long read_result, writeval;
-    off_t target;
-   
-    target = RTC_SS_BASE;
+unsigned gettime( unsigned char *base, unsigned char time_offset ) {
 	
-	printf("Opening /dev/mem...");
-    fflush(stdout);
-     
-    if((fd = open("/dev/mem", O_RDWR | O_SYNC)) == -1) {
+	struct tm time;
+	
+	time.tm_sec   = get32reg( base , time_offset + TM_SECONDS_OFF );
+	time.tm_min   = get32reg( base , time_offset + TM_MINUTES_OFF );
+	time.tm_hour  = get32reg( base , time_offset + TM_HOURS_OFF );
+	time.tm_mday  = get32reg( base , time_offset + TM_DAYS_OFF );
+	time.tm_mon   = get32reg( base , time_offset + TM_MONTHS_OFF );
+	time.tm_year  = get32reg( base , time_offset + TM_YEARS_OFF ) + 100;	// Assume we are in the 2000's not 1900's (RTC only has 2 year digits)
+	
+	return mktime( &time );
+	
+}
+
+
+void settime( unsigned char *base, unsigned char time_offset , time_t newtime ) {
+	
+	struct tm *time = gmtime( &newtime );
 		
-		fprintf(stderr,"Error opening /dev/mem:%s",strerror(errno));
+	set32reg( base , time_offset + TM_SECONDS_OFF , time->tm_sec   );
+	set32reg( base , time_offset + TM_MINUTES_OFF , time->tm_min);
+	set32reg( base , time_offset + TM_HOURS_OFF , time->tm_hour );
+	set32reg( base , time_offset + TM_DAYS_OFF , time->tm_mday   );
+	set32reg( base , time_offset + TM_MONTHS_OFF , time->tm_mon);
+	set32reg( base , time_offset + TM_YEARS_OFF , time->tm_year % 100) ;	//  (RTC only has 2 year digits)
+		
+}
+
+
+void showhelp() {
+	printf("Usage:\n");
+	printf("   rtcbb (sleep|wake|now) (get|set <time>) \n");
+	printf("Where:\n");
+	printf("   set sets the specified value to <time>\n");
+	printf("   get prints the specified value to stdout\n");
+	printf("   time is in seconds since epoch, parsed leniently\n");
+	printf("Notes:");
+	printf("   wake should always be later than sleep\n");
+	printf("   if you sleep without setting a wake then you must push the power button to wake\n");
+	printf("   use 'bbbrtc dump` to dump the contents of all registers to stdout\n");
+	printf("times:\n");
+	printf("   always specified in seconds since the epoch Jan 1, 1970\n");
+	printf("examples:\n");
+	printf("   set the rtc to the current system clock time...\n");
+	printf("      rtcbbb now set $(date +%%s)\n");
+	printf("   set the system clock to the current rtc time...\n");
+	printf("      date $(rtcbbb now get)\n");
+	printf("   set to sleep 10 seconds from now...\n");
+	printf("      rtcbbb sleep set $(date +%%s -d=\"$(rtcbbb now get)+(10 sec)\")\n");
+	printf("   set to wake 6 months after we go to sleep ...\n");
+	printf("      rtcbbb wake set $(date +%%s -d=\"$(rtcbbb sleep get)+(6 month)\")\n");
+	printf("notes:\n");
+	printf("   If you want to be able to wake from sleeping, you must turn off the 'off' bit\n");
+	printf("   in the PMIC controller with this command before sleeping..\n");
+	printf("   i2cset -f -y 0 0x24 0x0a 0x00\n");	
+	printf("\n");
+	printf("   The RTC doesn't know about timezones or DST, but as long as you are consistent\n");
+	printf("   and set both all the times using the same base, then all relatives times should work.\n");
+}
+
+enum clock_choice_t  { CLOCK_NONE , NOW, SLEEP , WAKE };
+enum action_choice_t { ACTION_NONE , GET , SET , DUMP };
+
+// Returns the offset into the RTC base of the record to the selected clock
+
+unsigned clock_choice_off( clock_choice_t clock_choice ) {
+	
+	switch (clock_choice) {
+		
+		case NOW:
+			return RTC_CURRENT_TIME_TM;
+			
+		case SLEEP:
+			return RTC_ALARM2_TIME_TM;
+			
+		case WAKE:
+			return RTC_ALARM_TIME_TM;
+		
+		
+	}
+		
+}
+
+int main(int argc, char **argv) {
+		
+	clock_choice_t clock_choice;								// Pointer to the chosen clock record
+	action_choice_t action_choice = ACTION_NONE;
+	unsigned set_value;
+	
+	printf("argc=%d argv[1]=%s\n",argc,argv[1]);
+	
+	if (argc == 2 && !strcasecmp( argv[1] , "dump" ) ) {
+		
+		action_choice = DUMP;
 		
 	} else {
-	
-		printf("opened.\n");
-
-		printf("Mappng in %p..." , target );
-		fflush(stdout);
 				
-		map_base = mmap(0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, target );
+		if (argc==3 && !strcasecmp( argv[2] , "get")) {
+			action_choice = GET;
+		} else if (argc==4 &&  !strcasecmp( argv[1] , "set")) {
+			action_choice = SET;
+			set_value = (unsigned) strtoul( argv[3] , NULL , 10 );
+		} 
 		
-		if(map_base == MAP_FAILED ) {
+		if (action_choice!= ACTION_NONE) {
 			
-			fprintf(stderr,"Error mmapping /dev/mem:%s",strerror(errno));
+			// Get target clock
+			
+			if (!strcasecmp( argv[1] , "now")) {
+				clock_choice = NOW;
+			} else if (!strcasecmp( argv[1] , "sleep")) {
+				clock_choice = SLEEP;
+			} else if (!strcasecmp( argv[1] , "wake" )) {
+				clock_choice = WAKE;
+			} else {
+				printf("1st arg was '%s', must be either dump, now, sleep, or wake\n" , argv[2]);
+				action_choice = ACTION_NONE;
+			}								
+		}			
+	}
+	
+	
+	if ( action_choice == ACTION_NONE ) {			// Bad params
+	
+			showhelp();
+			
+	} else {
+		
+		// HERE IS THE BEEF
+		
+		int fd;
+				
+		printf("Opening /dev/mem...");
+		fflush(stdout);
+		 
+		if((fd = open("/dev/mem", O_RDWR | O_SYNC)) == -1) {
+			
+			fprintf(stderr,"Error opening /dev/mem:%s",strerror(errno));
 			
 		} else {
-			
-			printf("mapped at address %p.\n", map_base);	
-			fflush(stdout);
+		
+			printf("opened.\n");
 
-			unsigned char *base = (unsigned char *) map_base;
-			
-			if (argc < 2 ) {
-				
-				printf("Usage:\n");
-				printf("   rtcbb (sleep|wake|now) (get|set <time>) \n");
-				printf("Where:\n");
-				printf("   set sets the specified value to <time>\n")
-				printf("   get prints the specified value to stdout\n");
-				printf("   all times are in seconds since epoch\n");
-				printd("Notes:")
-				printf("   wake should always be later than sleep\n");
-				printf("   if you sleep without setting a wake then you must push the power button to wake\n");
-				printf("   use 'bbbrtc dump` to dump the contents of all registers to stdout\n")
-				printf("times:\n");
-				printf("   always specified in seconds since the epoch Jan 1, 1970\n");
-				printf("examples:\n");
-				printf("   set the rtc to the current system clock time...\n");
-				printf("      rtcbbb now set $(date +%%s)\n");
-				printf("   set the system clock to the current rtc time...\n");
-				printf("      date $(rtcbbb now get)\n");
-				printf("   set to sleep 10 seconds from now...\n");
-				printf("      rtcbbb sleep set $(date +%%s -d=\"$(rtcbbb now get)+(10 sec)\")\n");
-				printf("   set to wake 6 months after we go to sleep ...\n");
-				printf("      rtcbbb wake set $(date +%%s -d=\"$(rtcbbb sleep get)+(6 month)\")\n");
-				printf("notes:\n");
-				printf("   if you want to be able to wake from sleeping, you must turn off the 'off' bit\n");
-				printf("   in the PMIC controller with this command before sleeping..\n");
-				printf("   i2cset -f -y 0 0x24 0x0a 0x00\n");
-				
-			} else if ( argc == 2 && stricmp( argv[1] , "dump" ) {
-				
-				dump(base);
-				
-			} else {
-				 
-				int time_offset; 
-				
-				int dest_set =0;
-				
-				if ( stricmp( argv[1] , "now" ) ){
-					time_offset = RTC_CURRENT_TIME_TM;
-					dest_set=1;
-				} else if ( stricmp( argv[1] , "sleep") ) {
-					time_offset = RTC_ALARM2_TIME_TM;
-					dest_set=1;					
-				} else if ( stricmp( argv[1] , "wake") ) {
-					time_offset = RTC_ALARM_TIME_TM;
-					dest_set=1;					
-				} 
-				
-				if (!dest_set) {
-					printf("invalid destination, must be now,sleep, or wake.");					
-				} else {
-					
-					if (argc==3 && stricmp( argv[2] , "get")) {
-						
-						printf("%u\n" , gettime( base. time_offset );
-						
-					}
-					
-				}
-				
-			}
-			
-			
-			
-			printf("Value at address %d\n", *base );
+			printf("Mappng in %p..." , RTC_SS_BASE );
 			fflush(stdout);
 			
-			dump(base);
-
-			// HERE IS THE BEEF
+			unsigned char *base;
+					
+			base = (unsigned char *) mmap(0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, RTC_SS_BASE );
 			
-			printf("Turn off PMIC OFF bit...");
-			
-			int i2cset_ret=system("i2cset -f -y 0 0x24 0x0a 0x00");			// Turn off OFF bit
-			
-			if (i2cset_ret) {
+			if( base == MAP_FAILED ) {
 				
-				printf("failed with code %d.\n");
+				fprintf(stderr,"Error mmapping /dev/mem:%s",strerror(errno));
 				
 			} else {
-			
-				printf("off.\n");
-
 				
-				// We can not guaratee being able to access regs in the 15us not busy window under linux, so
+				printf("mapped at address %p.\n", base);	
+				fflush(stdout);
+				
+
+				// We can not guarantee being able to access regs in the 15us not busy window under linux, so
 				// instead we stop the whole RTC and the restart it when done.
 				// We will drop some time each time, but not much. 
 				
@@ -247,7 +277,7 @@ int main(int argc, char **argv) {
 				printf("Stopping RTC...");
 				fflush(stdout);
 				
-				set32reg( base , RTC_CTRL_REG ,  0x00);		// Write a 0 to bit 0 to freeze the RTC so we cna update regs
+				set32reg( base , RTC_CTRL_REG ,  0x00);		// Write a 0 to bit 0 to freeze the RTC so we can update regs
 				
 				printf("waiting for stop...");
 				fflush(stdout);
@@ -261,181 +291,61 @@ int main(int argc, char **argv) {
 					fflush(stdout); 
 					
 				} while (0);
-				
-				
-				printf("Get current time ...\n");
-					
-				int secs   = bcd2n( base[ SECONDS_REG] );
-				int mins   = bcd2n( base[ MINUTES_REG] );
-				int hours  = bcd2n( base[ HOURS_REG ] );
-				int days   = bcd2n( base[ DAYS_REG ] );
-				int months = bcd2n( base[ MONTHS_REG ] );
-				int years  = bcd2n( base[ YEARS_REG ] );
 
-				printf("Bump forward 5 secs in the future......\n");
-				
-				secs += 5;
-				
-				if (secs >= 60 ) {
-					
-					secs %= 60;
-					
-					mins++;
-					
-					if (mins >= 60 ) {
-						
-						mins %=60; 
-						
-						hours++;
-						
-						if (hours >=24 ) {
-							
-							hours %=24;
-							
-							days++;
-							
-							// TODO: Make work last day of the month at midnight
-						}
-					}
-				}
-				/*
-				
-				printf("Set ALARM for wakeup......\n");
-					
-				base[ALARM_SECONDS_REG]  = n2bcd( secs );
-				base[ALARM_MINUTES_REG]  = n2bcd( mins );
-				base[ALARM_HOURS_REG]    = n2bcd( hours );
-				base[ALARM_DAYS_REG]     = n2bcd( days );
-				base[ALARM_MONTHS_REG]   = n2bcd( months );
-				base[ALARM_YEARS_REG]    = n2bcd( years );
-				
-				printf("NOW ALARM\n");
-				printf("%3.3x %3.3x\n" , base[ SECONDS_REG], base[ ALARM_SECONDS_REG] );
-				printf("%3.3x %3.3x\n" , base[ MINUTES_REG], base[ ALARM_MINUTES_REG] );
-				printf("%3.3x %3.3x\n" , base[ HOURS_REG], base[ ALARM_HOURS_REG] );
-				printf("%3.3x %3.3x\n" , base[ DAYS_REG], base[ ALARM_DAYS_REG] );
-				printf("%3.3x %3.3x\n" , base[ MONTHS_REG], base[ ALARM_MONTHS_REG] );
-				printf("%3.3x %3.3x\n" , base[ YEARS_REG], base[ ALARM_YEARS_REG] );
-			 
-				printf(" Enable ALARM interrupt (necessary?)... \n");
-			 
-				set32reg( base , RTC_INTERRUPTS_REG , RTC_INTERRUPTS_IT_ALARM );
-				
-				printf("Enable PWR_ENABLE_EN to be controlled ON->OFF by ALARM2...\n");
-				
-				set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN );
-				
-				set32reg( base , RTC_IRQWAKEEN , RTC_IRQWAKEEN_ALARM );
-				
-				*/
-				
-				printf("Set ALARM2 for sleep......\n");
-					
-				base[ALARM2_SECONDS_REG]  = n2bcd( secs );
-				base[ALARM2_MINUTES_REG]  = n2bcd( mins );
-				base[ALARM2_HOURS_REG]    = n2bcd( hours );
-				base[ALARM2_DAYS_REG]     = n2bcd( days );
-				base[ALARM2_MONTHS_REG]   = n2bcd( months );
-				base[ALARM2_YEARS_REG]    = n2bcd( years );
-				
-				printf("NOW ALARM2\n");
-				printf("%3.3x %3.3x\n" , base[ SECONDS_REG], base[ ALARM2_SECONDS_REG] );
-				printf("%3.3x %3.3x\n" , base[ MINUTES_REG], base[ ALARM2_MINUTES_REG] );
-				printf("%3.3x %3.3x\n" , base[ HOURS_REG], base[ ALARM2_HOURS_REG] );
-				printf("%3.3x %3.3x\n" , base[ DAYS_REG], base[ ALARM2_DAYS_REG] );
-				printf("%3.3x %3.3x\n" , base[ MONTHS_REG], base[ ALARM2_MONTHS_REG] );
-				printf("%3.3x %3.3x\n" , base[ YEARS_REG], base[ ALARM2_YEARS_REG] );
-			 
 
-				// bump forward an additional 5 seconds after sleep
-			 
-				secs += 5;
 				
-				if (secs >= 60 ) {
+				switch (action_choice) {
 					
-					secs %= 60;
-					
-					mins++;
-					
-					if (mins >= 60 ) {
+					case DUMP:
+						dump(base);
+						break;
 						
-						mins %=60; 
+					case GET:
+						gettime( base , clock_choice_off( clock_choice) );
+						break;
 						
-						hours++;
-						
-						if (hours >=24 ) {
+					case SET:
+						settime( base , clock_choice_off( clock_choice) , set_value );
+											
+						if ( clock_choice == SLEEP ) {
 							
-							hours %=24;
+							printf("Enable PWR_ENABLE_EN to be controlled ON->OFF by ALARM2...\n");							
+							set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN );
+							printf( "enabled.\n");
+
+							printf(" Enable ALARM2 interrupt bit... \n");							
+							set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM2 );
+							printf( "enabled.\n");
 							
-							days++;
 							
-							// TODO: Make work last day of the month at midnight
+						} else if (clock_choice == WAKE ) {
+							
+							printf("Enable PWR_ENABLE_EN to be controlled OFF->ON by ALARM...\n");														
+							set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM );
+							printf( "enabled.\n");
+
+							printf(" Enable ALARM interrupt bit... \n");							
+							set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM );
+							printf( "enabled.\n");
+
+							printf(" Enable IRQ WAKE ENABLE bit... \n");													
+							set32reg( base , RTC_IRQWAKEEN , RTC_IRQWAKEEN_ALARM );
+							printf( "enabled.\n");							
+							
 						}
-					}
+						
+						break;
+						
+					default:
+						printf("Huh? How'd that happen?\n");
+						break;
+						
 				}
 				
-				
-				printf("Set ALARM for wakeup......\n");
-					
-				base[ALARM_SECONDS_REG]  = n2bcd( secs );
-				base[ALARM_MINUTES_REG]  = n2bcd( mins );
-				base[ALARM_HOURS_REG]    = n2bcd( hours );
-				base[ALARM_DAYS_REG]     = n2bcd( days );
-				base[ALARM_MONTHS_REG]   = n2bcd( months );
-				base[ALARM_YEARS_REG]    = n2bcd( years );
-				
-				printf("NOW ALARM\n");
-				printf("%3.3x %3.3x\n" , base[ SECONDS_REG], base[ ALARM_SECONDS_REG] );
-				printf("%3.3x %3.3x\n" , base[ MINUTES_REG], base[ ALARM_MINUTES_REG] );
-				printf("%3.3x %3.3x\n" , base[ HOURS_REG], base[ ALARM_HOURS_REG] );
-				printf("%3.3x %3.3x\n" , base[ DAYS_REG], base[ ALARM_DAYS_REG] ); 
-				printf("%3.3x %3.3x\n" , base[ MONTHS_REG], base[ ALARM_MONTHS_REG] );
-				printf("%3.3x %3.3x\n" , base[ YEARS_REG], base[ ALARM_YEARS_REG] );
-				 
-
-				printf("Enable WAKE...\n");
-				set32reg( base , RTC_IRQWAKEEN , RTC_IRQWAKEEN_ALARM | RTC_IRQWAKEEN_TIMER);		// Necessary? Need timer also?
-
-				printf("DONE setting Alarm times...\n");
-				
-				
-				printf("Enable PWR_ENABLE_EN to be controlled ON->OFF by ALARM2, EXTERNAL WAKE enabled...\n");	
-				//ASSIGN_WORD( base[RTC_PMIC] , RTC_PMIC_PWN_ENABLE_EN | RTC_PMIC_EXT_WAKE_EN  );
-				
-				set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN  );
-				
-				// Check with...
-				//  devmem2 0x44e3e098
-				
-				// Clear the ALARM@ bit with 
-				//  devmem2 0x44e3e044 w 0x82
-					
-				//printf("Enable Wake pin, invert polarity, PWR_ENABLE_EN to be controlled ON->OFF by ALARM2...\n");	
-				//base[RTC_PMIC]=0x10011;				//Enable wakeup pin, invert polarity, POWER_ENABLE_EN
-					
-				printf(" Enable alarm interrupts... \n");
-				set32reg( base , RTC_INTERRUPTS_REG  ,  RTC_INTERRUPTS_IT_ALARM2 | RTC_INTERRUPTS_IT_ALARM );	
-				
-				// Check with...
-				// devmem2 0x44e3e048
-				// should be 0x18
-				
-						 
-				/*
-				
-				for(int i=0; i<15;i++) {
-					printf("%d-%d\n",i, base[RTC_STATUS_REG] & RTC_STATUS_ALARM  );
-				
-					sleep(1); 
-					
-				} 
-				*/
-				
-				dump(base);
 				
 				printf("Restarting RTC...");
 				
-				set32reg( base  , RTC_CTRL_REG ,  RTC_CTRL_STOP);		// Write a 1 to bit 0 to start the RTC so we can update regs
+				set32reg( base  , RTC_CTRL_REG ,  RTC_CTRL_STOP);		// Write a 1 to bit 0 to start the RTC
 				
 				printf( "waiting for it to start..." );
 				
@@ -450,46 +360,25 @@ int main(int argc, char **argv) {
 					
 				} while (0);
 				
+							
+				printf("unmaping memory block...");
+
+				munmap( base, MAP_SIZE );
+				
+				printf("unmaped.\n");
 				
 			}
 			
-			printf("unmap...");
-
-			munmap(map_base, MAP_SIZE);
+			printf("closing fd...");		
 			
-			printf("unmaped.\n");
+			close(fd);	
+			
+			printf("closed.\n");
 			
 		}
 		
-		printf("closing fd...");		
-		
-		close(fd);	
-		
-		printf("closed.\n");
-		
 	}
-
-		
-	// Now got to sleep!
 	
-//	system("devmem2 0x44e3e098 w 0x10011");				//Enable wakeup pin, invert polarity, POWER_ENABLE_EN
-	 
-
-
-	
-//	system("i2cset -f -y 0 0x24 0x0a 0x080");			// Turn on OFF bit
-	
-//	system("i2cset -f -y 0 0x24 0x0b 0x63");			// PAssword to access 1e
-	
-	//printf("Sending SEQDWN+SEQUP...\n");
-	//system("i2cset -f -y 0 0x24 0x1e 0x06");			// Set DWNSEQ bit to start shutdown sequence
-	
-	
-	//system("i2cset -f -y 0 0x24 0x1e 0x02");			// Set DWNSEQ bit to start shutdown sequence
-
-	printf("Waiting for turnoff via TIMER2 in 5 seconds!...\n");
-	
-	//__asm__ __volatile__ ("cpsie i"); /* Clear PRIMASK */
 	
 	
     return 0;
@@ -503,8 +392,6 @@ int main(int argc, char **argv) {
 	#wake enable
 	devmem2 0x44e3e07c W 0x00
 	
-	
-	 
 	 
 	 */
 }
