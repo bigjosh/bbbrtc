@@ -160,7 +160,7 @@ unsigned gettime( unsigned char *base, unsigned char time_offset ) {
 	
 	time_t readtime = mktime(&time);
 	
-	diagprint( "read:%s\n", ctime(&readtime) );
+	//diagprint( "read:%s\n", ctime(&readtime) );
 		
 	return readtime;
 	
@@ -171,9 +171,9 @@ void settime( unsigned char *base, unsigned char time_offset , time_t newtime ) 
 	
 	struct tm *time = gmtime( &newtime );
 		
-	diagprint( "setting:%s\n", ctime(&newtime));
+	//diagprint( "setting:%s\n", ctime(&newtime));
 	
-	diagprint(" tmyear = %d\n " , time->tm_year  );
+	//diagprint(" tmyear = %d\n " , time->tm_year  );
 		
 	set32reg( base , time_offset + TM_SECONDS_OFF , n2bcd(time->tm_sec    ));
 	set32reg( base , time_offset + TM_MINUTES_OFF , n2bcd( time->tm_min   ));
@@ -215,16 +215,42 @@ void showhelp() {
 	diagprint( "      bbbrtc wake set $(date +%%s -d=\"$(rtcbbb sleep get)+(1 minute)\")\n");
 	diagprint( "   start rtc party...\n");
 	diagprint( "      bbbrtc now 946684770\n");
-	diagprint( "\n");			
+	diagprint( "\n");			 
 	diagprint( "notes:\n");
 	diagprint( "   If you want to be able to wake from sleeping, you must turn off the 'off' bit\n");
 	diagprint( "   in the PMIC controller with this command before going to sleep..\n");
 	diagprint( "   i2cset -f -y 0 0x24 0x0a 0x00\n");	
 	diagprint( "\n");
-	diagprint( "   The RTC doesn't know about timezones or DST, but as long as you are consistent\n");
-	diagprint( "   and set both all the times using the same base, then all relatives times should work.\n");	
-}
+	diagprint( "   The RTC doesn't know about timezones or DST, so best to use UTC time with it,\n");
+	diagprint( "   but as long as you are consistent and set both all the times using the same base,\n);
+	diagprint( "   then all relatives times should work.\n");	
+	diagprint( "\n");
+	diagprint( "   It looks like my Debian calls hwclock --systohc sometime during startup, n");
+	diagprint( "   even when Linux has no way of knowing what time it is (it is hardcoded to\n);
+	diagprint( "   Jun15 2016). This saddly which clobbers the time stored in the RTC, which \n);
+	diagprint( "   could otherwise be correct and used to set the linux clock.\n");	
+	
+	/*
+	
+	Take a quick nap for testing...
+	
+	i2cset -f -y 0 0x24 0x0a 0x00
+	sync
+	bbbrtc now 100
+	bbbrtc sleep 110
+	bbbrtc wake 120
+	
+	nano /etc/default/hwclock
+	 
+	Uncomment:
+	# Set this to yes if it is possible to access the hardware clock,
+	# or no if it is not.
+	HWCLOCKACCESS=no
 
+	
+	*/
+	
+}
 
 enum clock_choice_t  { NONE , NOW, SLEEP , WAKE };
 
@@ -275,9 +301,7 @@ int main(int argc, char **argv) {
 		
 	clock_choice_t clock_choice=NONE;
 	unsigned new_time=0;
-	
-	diagprint( "argc=%d argv[1]=%s\n",argc,argv[1]);
-		
+			
 	if (argc >= 2) {
 
 		if (!strcasecmp( argv[1] , "now")) {
@@ -385,7 +409,7 @@ int main(int argc, char **argv) {
 						settime( base , clock_choice_off( clock_choice) , new_time );
 						diagprint( "set.\n");
 						
-						printtimeregs( base , clock_choice_off(clock_choice ) );
+						//printtimeregs( base , clock_choice_off(clock_choice ) );
 						
 						
 						if ( clock_choice == SLEEP ) {
@@ -440,7 +464,7 @@ int main(int argc, char **argv) {
 				} while (0);
 				
 							
-				diagprint( "unmaping memory block...");
+				diagprint( "Unmaping memory block...");
 
 				munmap( base, MAP_SIZE );
 				
@@ -448,7 +472,7 @@ int main(int argc, char **argv) {
 				
 			}
 			
-			diagprint( "closing fd...");		
+			diagprint( "Closing fd...");		
 			
 			close(fd);	
 			
