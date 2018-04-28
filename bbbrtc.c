@@ -152,7 +152,11 @@ unsigned gettime( unsigned char *base, unsigned char time_offset ) {
 	time.tm_hour  = bcd2n( get32reg( base , time_offset + TM_HOURS_OFF ));
 	time.tm_mday  = bcd2n( get32reg( base , time_offset + TM_DAYS_OFF ));
 	time.tm_mon   = bcd2n( get32reg( base , time_offset + TM_MONTHS_OFF ));
-	time.tm_year  = bcd2n( get32reg( base , time_offset + TM_YEARS_OFF ) )+ 100;	// Assume we are in the 2000's not 1900's (RTC only has 2 year digits)
+	time.tm_year  = bcd2n( get32reg( base , time_offset + TM_YEARS_OFF ) );
+	
+	if (time.tm_year <70 ) {
+			time.tm_year += 100;	// Assume we are in the 2000's not 1900's after 1970 (RTC only has 2 year digits). Breaks in 2070. Come find me and I'll fix it then. 
+	}
 	
 	time_t readtime = mktime(&time);
 	
@@ -184,34 +188,41 @@ void settime( unsigned char *base, unsigned char time_offset , time_t newtime ) 
 
 void showhelp() {
 	diagprint( "Usage:\n");
-	diagprint( "   rtcbb dump\n");	
-	diagprint( "   rtcbb (sleep|wake|now) <new_time> \n");
+	diagprint( "   bbbrtc dump\n");	
+	diagprint( "   bbbrtc (sleep|wake|now) <new_time> \n");
+	diagprint( "\n");	
 	diagprint( "Where:\n");
 	diagprint( "   'bbbrtc dump` dumps the contents of all registers to stdout\n");	
 	diagprint( "   if <new_time> is present and non-zero, then the specified time is set\n");
 	diagprint( "   time is in seconds since epoch, parsed leniently\n");
 	diagprint( "   prints existing or newly set the value of the specified time\n");
+	diagprint( "\n");		
 	diagprint( "Notes:");
-	diagprint( "   wake should always be later than sleep or you will sleep forever\n");
+	diagprint( "   wake should always be later than sleep or you will sleep for 100 years\n");
 	diagprint( "   if you sleep without setting a wake then you must push the power button to wake\n");
+	diagprint( "\n");		
 	diagprint( "times:\n");
-	diagprint( "   always specified in seconds since the epoch Jan 1, 1970\n");
+	diagprint( "   always specified in seconds since the epoch Jan 1, 1970\n");	
+	diagprint( "\n");		
 	diagprint( "examples:\n");
 	diagprint( "   set the rtc to the current system clock time...\n");
-	diagprint( "      rtcbbb now set $(date +%%s)\n");
+	diagprint( "      bbbrtc now $(date +%%s)\n");
 	diagprint( "   set the system clock to the current rtc time...\n");
-	diagprint( "      date $(rtcbbb now get)\n");
+	diagprint( "      date -s @$(bbbrtc now )\n");
 	diagprint( "   set to sleep 10 seconds from now...\n");
-	diagprint( "      rtcbbb sleep set $(date +%%s -d=\"$(rtcbbb now get)+(10 sec)\")\n");
-	diagprint( "   set to wake 6 months after we go to sleep ...\n");
-	diagprint( "      rtcbbb wake set $(date +%%s -d=\"$(rtcbbb sleep get)+(6 month)\")\n");
+	diagprint( "      bbbrtc sleep $(date +%%s -d=\"$(rtcbbb now get)+(10 sec)\")\n");
+	diagprint( "   set to wake 1 minute after we go to sleep ...\n");
+	diagprint( "      bbbrtc wake set $(date +%%s -d=\"$(rtcbbb sleep get)+(1 minute)\")\n");
+	diagprint( "   start rtc party...\n");
+	diagprint( "      bbbrtc now 946684770\n");
+	diagprint( "\n");			
 	diagprint( "notes:\n");
 	diagprint( "   If you want to be able to wake from sleeping, you must turn off the 'off' bit\n");
-	diagprint( "   in the PMIC controller with this command before sleeping..\n");
+	diagprint( "   in the PMIC controller with this command before going to sleep..\n");
 	diagprint( "   i2cset -f -y 0 0x24 0x0a 0x00\n");	
 	diagprint( "\n");
 	diagprint( "   The RTC doesn't know about timezones or DST, but as long as you are consistent\n");
-	diagprint( "   and set both all the times using the same base, then all relatives times should work.\n");
+	diagprint( "   and set both all the times using the same base, then all relatives times should work.\n");	
 }
 
 
@@ -446,7 +457,6 @@ int main(int argc, char **argv) {
 		}
 		
 	}
-	
 	
 	
     return 0;
