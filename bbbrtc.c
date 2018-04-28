@@ -22,12 +22,12 @@
 
 // Offsets into the fields of a time record
 
-#define TM_SECONDS_OFF 			0x20
-#define TM_MINUTES_OFF			0x24
-#define TM_HOURS_OFF			0x28
-#define TM_DAYS_OFF				0x2C
-#define TM_MONTHS_OFF 			0x30
-#define TM_YEARS_OFF			0x34
+#define TM_SECONDS_OFF 			0x00
+#define TM_MINUTES_OFF			0x04
+#define TM_HOURS_OFF			0x08
+#define TM_DAYS_OFF				0x0C
+#define TM_MONTHS_OFF 			0x10
+#define TM_YEARS_OFF			0x14
 
 
 #define RTCALARMINT 			76			// RTC alarm interrupt
@@ -62,12 +62,9 @@
 #include <unistd.h>
 #include <string.h>			// strerror
 #include <errno.h>
-//#include <signal.h>
 #include <fcntl.h>
-//#include <ctype.h>
-//#include <termios.h>
-//#include <sys/types.h>
 #include <sys/mman.h>
+#include <stdarg.h>			// vargs for diagprint
 
 #define MAP_SIZE 4096UL
 #define MAP_MASK (MAP_SIZE - 1)
@@ -107,6 +104,29 @@ unsigned get32reg( unsigned char *base , unsigned char off) {
 	
 }
 
+// From: https://stackoverflow.com/questions/150543/forward-an-invocation-of-a-variadic-function-in-c
+
+void diagprint( const char *fmt, ... ) {
+	
+    /* Declare a va_list type variable */
+    va_list myargs;
+
+    /* Initialize the va_list variable with the ... after fmt */
+
+    va_start(myargs, fmt);
+
+    //fprintf( stderr , "bbbrtc:");
+	
+    /* Forward the '...' to vprintf */
+    vfprintf( stderr , fmt, myargs);
+	
+    //fprintf( stderr , "\n");
+	
+
+    /* Clean up the va_list */
+    va_end(myargs);	
+}
+
 
 unsigned gettime( unsigned char *base, unsigned char time_offset ) {
 	
@@ -121,7 +141,7 @@ unsigned gettime( unsigned char *base, unsigned char time_offset ) {
 	
 	time_t readtime = mktime(&time);
 	
-	fprintf( stderr,"read:%s\n", ctime(&readtime) );
+	diagprint( "read:%s\n", ctime(&readtime) );
 		
 	return readtime;
 	
@@ -132,7 +152,7 @@ void settime( unsigned char *base, unsigned char time_offset , time_t newtime ) 
 	
 	struct tm *time = gmtime( &newtime );
 		
-	fprintf( stderr,"setting:%s\n", ctime(&newtime));
+	diagprint( "setting:%s\n", ctime(&newtime));
 		
 	set32reg( base , time_offset + TM_SECONDS_OFF , time->tm_sec   );
 	set32reg( base , time_offset + TM_MINUTES_OFF , time->tm_min);
@@ -146,35 +166,35 @@ void settime( unsigned char *base, unsigned char time_offset , time_t newtime ) 
 
 
 void showhelp() {
-	fprintf( stderr,"Usage:\n");
-	fprintf( stderr,"   rtcbb dump\n");	
-	fprintf( stderr,"   rtcbb (sleep|wake|now) <new_time> \n");
-	fprintf( stderr,"Where:\n");
-	fprintf( stderr,"   'bbbrtc dump` dumps the contents of all registers to stdout\n");	
-	fprintf( stderr,"   if <new_time> is present and non-zero, then the specified time is set\n");
-	fprintf( stderr,"   time is in seconds since epoch, parsed leniently\n");
-	fprintf( stderr,"   prints existing or newly set the value of the specified time\n");
-	fprintf( stderr,"Notes:");
-	fprintf( stderr,"   wake should always be later than sleep or you will sleep forever\n");
-	fprintf( stderr,"   if you sleep without setting a wake then you must push the power button to wake\n");
-	fprintf( stderr,"times:\n");
-	fprintf( stderr,"   always specified in seconds since the epoch Jan 1, 1970\n");
-	fprintf( stderr,"examples:\n");
-	fprintf( stderr,"   set the rtc to the current system clock time...\n");
-	fprintf( stderr,"      rtcbbb now set $(date +%%s)\n");
-	fprintf( stderr,"   set the system clock to the current rtc time...\n");
-	fprintf( stderr,"      date $(rtcbbb now get)\n");
-	fprintf( stderr,"   set to sleep 10 seconds from now...\n");
-	fprintf( stderr,"      rtcbbb sleep set $(date +%%s -d=\"$(rtcbbb now get)+(10 sec)\")\n");
-	fprintf( stderr,"   set to wake 6 months after we go to sleep ...\n");
-	fprintf( stderr,"      rtcbbb wake set $(date +%%s -d=\"$(rtcbbb sleep get)+(6 month)\")\n");
-	fprintf( stderr,"notes:\n");
-	fprintf( stderr,"   If you want to be able to wake from sleeping, you must turn off the 'off' bit\n");
-	fprintf( stderr,"   in the PMIC controller with this command before sleeping..\n");
-	fprintf( stderr,"   i2cset -f -y 0 0x24 0x0a 0x00\n");	
-	fprintf( stderr,"\n");
-	fprintf( stderr,"   The RTC doesn't know about timezones or DST, but as long as you are consistent\n");
-	fprintf( stderr,"   and set both all the times using the same base, then all relatives times should work.\n");
+	diagprint( "Usage:\n");
+	diagprint( "   rtcbb dump\n");	
+	diagprint( "   rtcbb (sleep|wake|now) <new_time> \n");
+	diagprint( "Where:\n");
+	diagprint( "   'bbbrtc dump` dumps the contents of all registers to stdout\n");	
+	diagprint( "   if <new_time> is present and non-zero, then the specified time is set\n");
+	diagprint( "   time is in seconds since epoch, parsed leniently\n");
+	diagprint( "   prints existing or newly set the value of the specified time\n");
+	diagprint( "Notes:");
+	diagprint( "   wake should always be later than sleep or you will sleep forever\n");
+	diagprint( "   if you sleep without setting a wake then you must push the power button to wake\n");
+	diagprint( "times:\n");
+	diagprint( "   always specified in seconds since the epoch Jan 1, 1970\n");
+	diagprint( "examples:\n");
+	diagprint( "   set the rtc to the current system clock time...\n");
+	diagprint( "      rtcbbb now set $(date +%%s)\n");
+	diagprint( "   set the system clock to the current rtc time...\n");
+	diagprint( "      date $(rtcbbb now get)\n");
+	diagprint( "   set to sleep 10 seconds from now...\n");
+	diagprint( "      rtcbbb sleep set $(date +%%s -d=\"$(rtcbbb now get)+(10 sec)\")\n");
+	diagprint( "   set to wake 6 months after we go to sleep ...\n");
+	diagprint( "      rtcbbb wake set $(date +%%s -d=\"$(rtcbbb sleep get)+(6 month)\")\n");
+	diagprint( "notes:\n");
+	diagprint( "   If you want to be able to wake from sleeping, you must turn off the 'off' bit\n");
+	diagprint( "   in the PMIC controller with this command before sleeping..\n");
+	diagprint( "   i2cset -f -y 0 0x24 0x0a 0x00\n");	
+	diagprint( "\n");
+	diagprint( "   The RTC doesn't know about timezones or DST, but as long as you are consistent\n");
+	diagprint( "   and set both all the times using the same base, then all relatives times should work.\n");
 }
 
 
@@ -221,12 +241,14 @@ const char *clock_choice_name( clock_choice_t clock_choice ) {
 		
 }
 
+
+
 int main(int argc, char **argv) {
 		
 	clock_choice_t clock_choice=NONE;
 	unsigned new_time=0;
 	
-	fprintf( stderr,"argc=%d argv[1]=%s\n",argc,argv[1]);
+	diagprint( "argc=%d argv[1]=%s\n",argc,argv[1]);
 		
 	if (argc >= 2) {
 
@@ -257,18 +279,18 @@ int main(int argc, char **argv) {
 		
 		int fd;
 				
-		fprintf( stderr,"Opening /dev/mem...");
+		diagprint( "Opening /dev/mem...");
 		fflush(stdout);
 		 
 		if((fd = open("/dev/mem", O_RDWR | O_SYNC)) == -1) {
 			
-			fprintf( stderr,"Error opening /dev/mem:%s",strerror(errno));
+			diagprint( "Error opening /dev/mem:%s",strerror(errno));
 			
 		} else {
 		
-			fprintf( stderr,"opened.\n");
+			diagprint( "opened.\n");
 
-			fprintf( stderr,"Mappng in %p..." , RTC_SS_BASE );
+			diagprint( "Mappng in %p..." , RTC_SS_BASE );
 			fflush(stdout);
 			
 			unsigned char *base;
@@ -281,7 +303,7 @@ int main(int argc, char **argv) {
 				
 			} else {
 				
-				fprintf( stderr,"mapped at address %p.\n", base);	
+				diagprint( "mapped at address %p.\n", base);	
 				fflush(stdout);
 				
 
@@ -290,12 +312,12 @@ int main(int argc, char **argv) {
 				// We will drop some time each time, but not much. 
 				
 				
-				fprintf( stderr,"Stopping RTC...");
+				diagprint( "Stopping RTC...");
 				fflush(stdout);
 				
 				set32reg( base , RTC_CTRL_REG ,  0x00);		// Write a 0 to bit 0 to freeze the RTC so we can update regs
 				
-				fprintf( stderr,"waiting for stop...");
+				diagprint( "waiting for stop...");
 				fflush(stdout);
 				
 				do {
@@ -303,7 +325,7 @@ int main(int argc, char **argv) {
 				
 					while ( get32reg( base , RTC_STATUS_REG)  & RTC_STATUS_RUN ) wait_counter++;
 				
-					fprintf( stderr,"took %u tries.\n",wait_counter);
+					diagprint( "took %u tries.\n",wait_counter);
 					fflush(stdout); 
 					
 				} while (0);
@@ -311,50 +333,50 @@ int main(int argc, char **argv) {
 				
 				if (new_time) {			// Are we setting a new time?
 				
-					fprintf( stderr,"Setting %s to %u...\n",clock_choice_name( clock_choice) , new_time );									
+					diagprint( "Setting %s to %u...\n",clock_choice_name( clock_choice) , new_time );									
 					settime( base , clock_choice_off( clock_choice) , new_time );
-					fprintf( stderr, "set.\n");
+					diagprint( "set.\n");
 
 					
 					if ( clock_choice == SLEEP ) {
 						
-						fprintf( stderr,"Enable PWR_ENABLE_EN to be controlled ON->OFF by ALARM2...\n");							
+						diagprint( "Enable PWR_ENABLE_EN to be controlled ON->OFF by ALARM2...\n");							
 						set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN );
-						fprintf( stderr, "enabled.\n");
+						diagprint( "enabled.\n");
 
-						fprintf( stderr," Enable ALARM2 interrupt bit... \n");							
+						diagprint( " Enable ALARM2 interrupt bit... \n");							
 						set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM2 );
-						fprintf( stderr, "enabled.\n");
+						diagprint( "enabled.\n");
 						
 						
 					} else if (clock_choice == WAKE ) {
 						
-						fprintf( stderr,"Enable PWR_ENABLE_EN to be controlled OFF->ON by ALARM...\n");														
-						set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM );
-						fprintf( stderr, "enabled.\n");
+						diagprint( "Enable PWR_ENABLE_EN to be controlled OFF->ON by ALARM...\n");														
+						set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN );
+						diagprint( "enabled.\n");
 
-						fprintf( stderr," Enable ALARM interrupt bit... \n");							
+						diagprint( " Enable ALARM interrupt bit... \n");							
 						set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM );
-						fprintf( stderr, "enabled.\n");
+						diagprint( "enabled.\n");
 
-						fprintf( stderr," Enable IRQ WAKE ENABLE bit... \n");													
+						diagprint( " Enable IRQ WAKE ENABLE bit... \n");													
 						set32reg( base , RTC_IRQWAKEEN , RTC_IRQWAKEEN_ALARM );
-						fprintf( stderr, "enabled.\n");							
+						diagprint( "enabled.\n");							
 						
 					}
 					
 				}
 
-				fprintf( stderr,"Reading %s and printing to stdout...\n",clock_choice_name( clock_choice)  );									
+				diagprint( "Reading %s and printing to stdout...\n",clock_choice_name( clock_choice)  );									
 				printf( "%u\n" , gettime( base , clock_choice_off( clock_choice) ) );
-				fprintf( stderr, "done.\n");
+				diagprint( "done.\n");
 
 				
-				fprintf( stderr,"Restarting RTC...");
+				diagprint( "Restarting RTC...");
 				
 				set32reg( base  , RTC_CTRL_REG ,  RTC_CTRL_STOP);		// Write a 1 to bit 0 to start the RTC
 				
-				fprintf( stderr, "waiting for it to start..." );
+				diagprint( "waiting for it to start..." );
 				
 				do {
 					
@@ -362,25 +384,25 @@ int main(int argc, char **argv) {
 				
 					while ( !( get32reg( base , RTC_STATUS_REG)  & RTC_STATUS_RUN ) ) wait_counter++;
 				
-					fprintf( stderr,"took %u tries.\n",wait_counter);
+					diagprint( "took %u tries.\n",wait_counter);
 					fflush(stdout); 
 					
 				} while (0);
 				
 							
-				fprintf( stderr,"unmaping memory block...");
+				diagprint( "unmaping memory block...");
 
 				munmap( base, MAP_SIZE );
 				
-				fprintf( stderr,"unmaped.\n");
+				diagprint( "unmaped.\n");
 				
 			}
 			
-			fprintf( stderr,"closing fd...");		
+			diagprint( "closing fd...");		
 			
 			close(fd);	
 			
-			fprintf( stderr,"closed.\n");
+			diagprint( "closed.\n");
 			
 		}
 		
