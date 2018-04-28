@@ -119,7 +119,11 @@ unsigned gettime( unsigned char *base, unsigned char time_offset ) {
 	time.tm_mon   = get32reg( base , time_offset + TM_MONTHS_OFF );
 	time.tm_year  = get32reg( base , time_offset + TM_YEARS_OFF ) + 100;	// Assume we are in the 2000's not 1900's (RTC only has 2 year digits)
 	
-	return mktime( &time );
+	time_t readtime = mktime(&time);
+	
+	fprintf( stderr,"read:%s\n", ctime(&readtime) );
+		
+	return readtime;
 	
 }
 
@@ -128,13 +132,16 @@ void settime( unsigned char *base, unsigned char time_offset , time_t newtime ) 
 	
 	struct tm *time = gmtime( &newtime );
 		
+	fprintf( stderr,"setting:%s\n", ctime(&newtime));
+		
 	set32reg( base , time_offset + TM_SECONDS_OFF , time->tm_sec   );
 	set32reg( base , time_offset + TM_MINUTES_OFF , time->tm_min);
 	set32reg( base , time_offset + TM_HOURS_OFF , time->tm_hour );
 	set32reg( base , time_offset + TM_DAYS_OFF , time->tm_mday   );
 	set32reg( base , time_offset + TM_MONTHS_OFF , time->tm_mon);
 	set32reg( base , time_offset + TM_YEARS_OFF , time->tm_year % 100) ;	//  (RTC only has 2 year digits)
-		
+
+	
 }
 
 
@@ -233,7 +240,7 @@ int main(int argc, char **argv) {
 		
 		if (argc>= 3 ) {
 			
-			new_time = (unsigned) strtoul( argv[3] , NULL , 10 );
+			new_time = (unsigned) strtoul( argv[2] , NULL , 10 );
 			
 		} 
 		
