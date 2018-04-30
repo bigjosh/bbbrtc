@@ -203,19 +203,19 @@ void showhelp() {
     diagprint( "   wake should always be later than sleep or you will sleep for 100 years\n");
     diagprint( "   if you sleep without setting a wake then you must push the power button to wake\n");
     diagprint( "\n");
-    diagprint( "times:\n");
+    diagprint( "times:\n"); 
     diagprint( "   always specified in seconds since the epoch Jan 1, 1970\n");
     diagprint( "\n");
     diagprint( "examples:\n");
     diagprint( "   set the rtc to the current system clock time...\n");
     diagprint( "      bbbrtc now $(date +%%s)\n");
     diagprint( "   set the system clock to the current rtc time...\n");
-    diagprint( "      date -s @$(bbbrtc now )\n");
+    diagprint( "      date -s @$(bbbrtc now)\n");
     diagprint( "   set to sleep 10 seconds from now...\n");
-    diagprint( "      bbbrtc sleep $(date +%%s -d=\"$(rtcbbb now get)+(10 sec)\")\n");
-    diagprint( "   set to wake 1 minute after we go to sleep ...\n");
-    diagprint( "      bbbrtc wake set $(date +%%s -d=\"$(rtcbbb sleep get)+(1 minute)\")\n");
-    diagprint( "   start rtc party...\n");
+    diagprint( "      bbbrtc sleep $[$(rtcbbb now)+10])\n");	
+    diagprint( "   set to wake 1 day after we go to sleep ...\n");
+    diagprint( "       bbbrtc wake $(date +%%s -d \"$(date -d \"@$(bbbrtc sleep)\") + 1 day\")\n");
+    diagprint( "   start a bbbrtc party...\n");
     diagprint( "      bbbrtc now 946684770\n");
     diagprint( "\n");
     diagprint( "notes:\n");
@@ -238,17 +238,9 @@ void showhelp() {
 
     i2cset -f -y 0 0x24 0x0a 0x00
     sync
-    bbbrtc now 100
-    bbbrtc sleep 110
-    bbbrtc wake 120
-
-    nano /etc/default/hwclock
-
-    Uncomment:
-    # Set this to yes if it is possible to access the hardware clock,
-    # or no if it is not.
-    HWCLOCKACCESS=no
-
+    bbbrtc now 100 2>/dev/null
+    bbbrtc sleep 105 2>/dev/null
+    bbbrtc wake 110 2>/dev/null
 
     */
 
