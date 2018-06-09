@@ -1,6 +1,7 @@
 bbbrtc: bbbrtc.c
 	g++ bbbrtc.c -o bbbrtc
 	chmod +x bbbrtc
-	sudo cp bbbrtc /usr/local/bin/
+	mkdir -p $(DESTDIR)/usr/bin
+	sudo install bbbrtc /usr/bin/
 	rm bbbrtc
 	
