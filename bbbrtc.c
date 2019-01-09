@@ -8,6 +8,12 @@
 
 */
 
+// Linux 4+ locks the registers we need.
+// Here is the magic for unlocking them.
+#define RTC_KICK0_REG 0x6c
+#define RTC_KICK1_REG 0x70
+#define KICK0_VALUE 0x83e70b13
+#define KICK1_VALUE 0x95a4f1e0
 
 #define RTC_SS_BASE 0x44e3e000L             // Memory base for the RTC registers
 
@@ -107,6 +113,13 @@ unsigned get32reg( unsigned char *base , unsigned char off) {
 
 }
 
+// Unlock RTC registers in 4.x+ kernels
+void unlockrtcregs( unsigned char *base ) {
+    set32reg( base, RTC_KICK0_REG, KICK0_VALUE);
+    set32reg( base, RTC_KICK1_REG, KICK1_VALUE);
+}
+
+
 // From: https://stackoverflow.com/questions/150543/forward-an-invocation-of-a-variadic-function-in-c
 
 void diagprint( const char *fmt, ... ) {
@@ -190,7 +203,7 @@ void showhelp() {
     diagprint( "Usage:\n");
     diagprint( "   bbbrtc dump\n");
     diagprint( "   bbbrtc now <new_time>\n");
-    diagprint( "   bbbrtc (sleep|wake) (<new_time>|never)\n");	
+    diagprint( "   bbbrtc (sleep|wake) (<new_time>|never)\n");
     diagprint( "\n");
     diagprint( "Where:\n");
     diagprint( "   'bbbrtc dump` dumps the contents of all registers to stdout\n");
@@ -203,7 +216,7 @@ void showhelp() {
     diagprint( "   wake should always be later than sleep or you will sleep for 100 years\n");
     diagprint( "   if you sleep without setting a wake then you must push the power button to wake\n");
     diagprint( "\n");
-    diagprint( "times:\n"); 
+    diagprint( "times:\n");
     diagprint( "   always specified in seconds since the epoch Jan 1, 1970\n");
     diagprint( "\n");
     diagprint( "examples:\n");
@@ -212,7 +225,7 @@ void showhelp() {
     diagprint( "   set the system clock to the current rtc time...\n");
     diagprint( "      date -s @$(bbbrtc now)\n");
     diagprint( "   set to sleep 10 seconds from now...\n");
-    diagprint( "      bbbrtc sleep $[$(rtcbbb now)+10])\n");	
+    diagprint( "      bbbrtc sleep $[$(rtcbbb now)+10])\n");
     diagprint( "   set to wake 1 day after we go to sleep ...\n");
     diagprint( "       bbbrtc wake $(date +%%s -d \"$(date -d \"@$(bbbrtc sleep)\") + 1 day\")\n");
     diagprint( "   start a bbbrtc party...\n");
@@ -294,7 +307,7 @@ int dumpflag=0;     // Are we doing a dump?
 int main(int argc, char **argv) {
 
     clock_choice_t clock_choice=NONE;
-	
+
     const char *new_time=NULL;			// new time specified?
 
     if (argc >= 2) {
@@ -311,7 +324,7 @@ int main(int argc, char **argv) {
 
         if (argc>= 3 ) {
 
-            new_time = argv[2]; 
+            new_time = argv[2];
 
         }
 
@@ -364,6 +377,9 @@ int main(int argc, char **argv) {
                 diagprint( "Stopping RTC...");
                 fflush(stdout);
 
+                // Unlock registers
+                unlockrtcregs( base );
+
                 set32reg( base , RTC_CTRL_REG ,  0x00);     // Write a 0 to bit 0 to freeze the RTC so we can update regs
 
                 diagprint( "waiting for stop...");
@@ -398,75 +414,75 @@ int main(int argc, char **argv) {
                     //printtimeregs( base , clock_choice_off(clock_choice ) );
 
                     if (new_time) {         // Are we setting a new time?
-					
-					
-						if (!strcasecmp( new_time , "never") ) {
-							
-						
-							//printtimeregs( base , clock_choice_off(clock_choice ) );
 
 
-							if ( clock_choice == SLEEP ) {
-
-								diagprint( "Disable ALARM2 interrupt bit... \n");
-								set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) &  ~RTC_INTERRUPTS_IT_ALARM2 );
-								diagprint( "disabled.\n");
+          						if (!strcasecmp( new_time , "never") ) {
 
 
-							} else if (clock_choice == WAKE ) {
-
-								diagprint( "Disable ALARM interrupt bit... \n");
-								set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) &  !RTC_INTERRUPTS_IT_ALARM );
-								diagprint( "disabled.\n");
-
-								diagprint( "Disable IRQ WAKE ENABLE bit... \n");
-								set32reg( base , RTC_IRQWAKEEN , get32reg( base , RTC_IRQWAKEEN ) & ~RTC_IRQWAKEEN_ALARM );
-								diagprint( "disabled.\n");
-
-							}	
-							
-						} else {		// Set new time...
-						
-							unsigned set_value = (unsigned) strtoul( new_time , NULL , 10 );
-
-							diagprint( "Setting %s to %u...",clock_choice_name( clock_choice) , set_value );
-							settime( base , clock_choice_off( clock_choice) , set_value );
-							diagprint( "set.\n");
-
-							//printtimeregs( base , clock_choice_off(clock_choice ) );
+          							//printtimeregs( base , clock_choice_off(clock_choice ) );
 
 
-							if ( clock_choice == SLEEP ) {
+          							if ( clock_choice == SLEEP ) {
 
-								diagprint( "Enable PWR_ENABLE_EN to be controlled ON->OFF by ALARM2...\n");
-								set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN );
-								diagprint( "enabled.\n");
-
-								diagprint( "Enable ALARM2 interrupt bit... \n");
-								set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM2 );
-								diagprint( "enabled.\n");
+          								diagprint( "Disable ALARM2 interrupt bit... \n");
+          								set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) &  ~RTC_INTERRUPTS_IT_ALARM2 );
+          								diagprint( "disabled.\n");
 
 
-							} else if (clock_choice == WAKE ) {
+          							} else if (clock_choice == WAKE ) {
 
-								diagprint( "Enable PWR_ENABLE_EN to be controlled OFF->ON by ALARM...\n");
-								set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN );
-								diagprint( "enabled.\n");
+          								diagprint( "Disable ALARM interrupt bit... \n");
+          								set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) &  !RTC_INTERRUPTS_IT_ALARM );
+          								diagprint( "disabled.\n");
 
-								diagprint( "Enable ALARM interrupt bit... \n");
-								set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM );
-								diagprint( "enabled.\n");
+          								diagprint( "Disable IRQ WAKE ENABLE bit... \n");
+          								set32reg( base , RTC_IRQWAKEEN , get32reg( base , RTC_IRQWAKEEN ) & ~RTC_IRQWAKEEN_ALARM );
+          								diagprint( "disabled.\n");
 
-								diagprint( "Enable IRQ WAKE ENABLE bit... \n");
-								set32reg( base , RTC_IRQWAKEEN , RTC_IRQWAKEEN_ALARM );
-								diagprint( "enabled.\n");
+          							}
 
-							} else {
-								
-								diagprint("WARNING: never does not really make sense here! Nothing done!\n");								
-								
-							}
-						}
+          						} else {		// Set new time...
+
+          							unsigned set_value = (unsigned) strtoul( new_time , NULL , 10 );
+
+          							diagprint( "Setting %s to %u...",clock_choice_name( clock_choice) , set_value );
+          							settime( base , clock_choice_off( clock_choice) , set_value );
+          							diagprint( "set.\n");
+
+          							//printtimeregs( base , clock_choice_off(clock_choice ) );
+
+
+          							if ( clock_choice == SLEEP ) {
+
+          								diagprint( "Enable PWR_ENABLE_EN to be controlled ON->OFF by ALARM2...\n");
+          								set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN );
+          								diagprint( "enabled.\n");
+
+          								diagprint( "Enable ALARM2 interrupt bit... \n");
+          								set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM2 );
+          								diagprint( "enabled.\n");
+
+
+          							} else if (clock_choice == WAKE ) {
+
+          								diagprint( "Enable PWR_ENABLE_EN to be controlled OFF->ON by ALARM...\n");
+          								set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN );
+          								diagprint( "enabled.\n");
+
+          								diagprint( "Enable ALARM interrupt bit... \n");
+          								set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM );
+          								diagprint( "enabled.\n");
+
+          								diagprint( "Enable IRQ WAKE ENABLE bit... \n");
+          								set32reg( base , RTC_IRQWAKEEN , RTC_IRQWAKEEN_ALARM );
+          								diagprint( "enabled.\n");
+
+          							} else {
+
+          								diagprint("WARNING: never does not really make sense here! Nothing done!\n");
+
+          							}
+          						}
 
                     }
 
