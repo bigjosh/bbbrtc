@@ -115,6 +115,7 @@ unsigned get32reg( unsigned char *base , unsigned char off) {
 
 // Unlock RTC registers in 4.x+ kernels
 void unlockrtcregs( unsigned char *base ) {
+    diagprint("Unlocking Kick Registers\n");
     set32reg( base, RTC_KICK0_REG, KICK0_VALUE);
     set32reg( base, RTC_KICK1_REG, KICK1_VALUE);
 }
@@ -204,6 +205,7 @@ void settime( unsigned char *base, unsigned char time_offset , time_t newtime ) 
 
 void showhelp() {
     diagprint( "Usage:\n");
+    diagprint( "   bbbrtc unlock\n");
     diagprint( "   bbbrtc dump\n");
     diagprint( "   bbbrtc now <new_time>\n");
     diagprint( "   bbbrtc (sleep|wake) (<new_time>|never)\n");
@@ -223,6 +225,8 @@ void showhelp() {
     diagprint( "   always specified in seconds since the epoch Jan 1, 1970\n");
     diagprint( "\n");
     diagprint( "examples:\n");
+    diagprint( "   unlock rtc registers for linux 4+...\n");
+    diagprint( "      bbbrtc unlock\n");
     diagprint( "   set the rtc to the current system clock time...\n");
     diagprint( "      bbbrtc now $(date +%%s)\n");
     diagprint( "   set the system clock to the current rtc time...\n");
@@ -445,9 +449,6 @@ int cmd_now( const char *new_time ) {
     return 1;
   }
 
-  // Unlock registers
-  unlockrtcregs( base );
-
 
   // We can not guarantee being able to access regs in the 15us not busy window under linux, so
   // instead we stop the whole RTC and the restart it when done.
@@ -499,9 +500,6 @@ int cmd_sleep( const char *new_time ) {
   if ( openrtc(&fd, &base) != 0 ){
     return 1;
   }
-
-  // Unlock registers
-  unlockrtcregs( base );
 
 
   // We can not guarantee being able to access regs in the 15us not busy window under linux, so
@@ -565,9 +563,6 @@ int cmd_wake( const char *new_time ) {
     return 1;
   }
 
-  // Unlock registers
-  unlockrtcregs( base );
-
 
   // We can not guarantee being able to access regs in the 15us not busy window under linux, so
   // instead we stop the whole RTC and the restart it when done.
@@ -626,9 +621,6 @@ int cmd_dump() {
     return 1;
   }
 
-  // Unlock registers
-  unlockrtcregs( base );
-
 
   // We can not guarantee being able to access regs in the 15us not busy window under linux, so
   // instead we stop the whole RTC and the restart it when done.
@@ -641,6 +633,26 @@ int cmd_dump() {
   dump(base);
 
   startrtc( base );
+  closertc( fd, base );
+
+  return 0;
+
+}
+
+int cmd_unlock() {
+
+  int fd;
+
+  unsigned char *base;
+
+  // Open RTC
+  if ( openrtc(&fd, &base) != 0 ){
+    return 1;
+  }
+
+  // Unlock registers
+  unlockrtcregs( base );
+
   closertc( fd, base );
 
   return 0;
@@ -665,6 +677,8 @@ int main(int argc, char **argv) {
             return cmd_wake( new_time );
         } else if (!strcasecmp( argv[1] , "dump" )) {
             return cmd_dump();
+        } else if (!strcasecmp( argv[1] , "unlock" )) {
+            return cmd_unlock();
         } else {
           showhelp();
           return 1;
