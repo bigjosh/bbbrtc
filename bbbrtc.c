@@ -267,7 +267,7 @@ int openrtc( int *fd, unsigned char **base ) {
 
   if((*fd = open("/dev/mem", O_RDWR | O_SYNC)) == -1) {
 
-    diagprint( "Error opening /dev/mem:%s",strerror(errno));
+    diagprint( "\nError opening /dev/mem: %s\n",strerror(errno));
 
     return 1;
 
@@ -281,7 +281,7 @@ int openrtc( int *fd, unsigned char **base ) {
 
     if( *base == MAP_FAILED ) {
 
-      fprintf( stderr ,"Error mmapping /dev/mem:%s",strerror(errno));
+      fprintf( stderr ,"\nError mmapping /dev/mem: %s\n",strerror(errno));
 
       close( *fd );
 
