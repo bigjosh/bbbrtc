@@ -113,13 +113,6 @@ unsigned get32reg( unsigned char *base , unsigned char off) {
 
 }
 
-// Unlock RTC registers in 4.x+ kernels
-void unlockrtcregs( unsigned char *base ) {
-    diagprint("Unlocking Kick Registers\n");
-    set32reg( base, RTC_KICK0_REG, KICK0_VALUE);
-    set32reg( base, RTC_KICK1_REG, KICK1_VALUE);
-}
-
 
 // From: https://stackoverflow.com/questions/150543/forward-an-invocation-of-a-variadic-function-in-c
 
@@ -157,6 +150,13 @@ void printtimeregs( unsigned char *base, unsigned char time_offset  ) {
     printf("month %3.3x\n" , get32reg( base , time_offset + TM_HOURS_OFF ) );
     printf("year  %3.3x\n" , get32reg( base , time_offset + TM_YEARS_OFF ) );
 
+}
+
+// Unlock RTC registers in 4.x+ kernels
+void unlockrtcregs( unsigned char *base ) {
+    diagprint("Unlocking Kick Registers\n");
+    set32reg( base, RTC_KICK0_REG, KICK0_VALUE);
+    set32reg( base, RTC_KICK1_REG, KICK1_VALUE);
 }
 
 
