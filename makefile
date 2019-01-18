@@ -7,6 +7,6 @@ bbbrtc: bbbrtc.c
 
 .PHONY: install
 install: bbbrtc
-	mkdir -p $(DESTDIR)/usr/bin
-	sudo install bbbrtc /usr/bin/
-	rm bbbrtc
+	mkdir -p $(DESTDIR)/usr/sbin
+	sudo install bbbrtc $(DESTDIR)/usr/sbin/
+	sudo install bbb-long-reset $(DESTDIR)/usr/sbin/

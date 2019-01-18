@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# tell power controller to accept signals
+i2cset -f -y 0 0x24 0x0a 0x00
+
+# unlock rtc registers if we are running a kernel newer than 3.X
+kernel_major=`uname -r | grep -o -E '^[0-9]+'`
+if [ "$kernel_major" -ge "4" ]; then
+  bbbrtc unlock
+fi
+
+# Go to sleep for 8 seconds 2 seconds from now
+bbbrtc long-reset 8 2

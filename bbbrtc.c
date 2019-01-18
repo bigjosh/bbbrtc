@@ -209,6 +209,7 @@ void showhelp() {
     diagprint( "   bbbrtc dump\n");
     diagprint( "   bbbrtc now <new_time>\n");
     diagprint( "   bbbrtc (sleep|wake) (<new_time>|never)\n");
+    diagprint( "   bbbrtc long-reset <down_time> <delay>\n");
     diagprint( "\n");
     diagprint( "Where:\n");
     diagprint( "   'bbbrtc dump` dumps the contents of all registers to stdout\n");
@@ -237,6 +238,8 @@ void showhelp() {
     diagprint( "       bbbrtc wake $(date +%%s -d \"$(date -d \"@$(bbbrtc sleep)\") + 1 day\")\n");
     diagprint( "   start a bbbrtc party...\n");
     diagprint( "      bbbrtc now 946684770\n");
+    diagprint( "   go to sleep for 5 seconds 2 seconds from now...\n");
+    diagprint( "      bbbrtc long-reset 5 2\n");
     diagprint( "\n");
     diagprint( "notes:\n");
     diagprint( "   If you want to be able to wake from sleeping, you must turn off the 'off' bit\n");
@@ -610,6 +613,96 @@ int cmd_wake( const char *new_time ) {
 
 }
 
+int cmd_long_reset( const char *down_time, const char *delay ) {
+  clock_choice_t clock_choice=WAKE;
+
+  int fd;
+
+  unsigned char *base;
+
+  char *notn;
+  // inputs
+  unsigned int_down_time;
+  unsigned int_delay;
+
+  // clock values
+  unsigned now;
+  unsigned sleep;
+  unsigned wake;
+
+  if ( down_time ) {
+    int_down_time = (unsigned) strtoul( down_time , &notn , 10 );
+    diagprint("\nERROR: Down time must be a number.\n");
+    return 1;
+  } else {
+    diagprint("\nERROR: Missing required argument \"down_time\".\n");
+    return 1;
+  }
+
+  if ( delay ) {
+    int_delay = (unsigned) strtoul( delay , &notn , 10 );
+    diagprint("\nERROR: Delay must be a number.\n");
+    return 1;
+  } else {
+    diagprint("\nERROR: Missing required argument \"delay\".\n");
+    return 1;
+  }
+
+  // Open RTC
+  if ( openrtc(&fd, &base) != 0 ){
+    return 1;
+  }
+
+
+  // We can not guarantee being able to access regs in the 15us not busy window under linux, so
+  // instead we stop the whole RTC and the restart it when done.
+  // We will drop some time each time, but not much.
+
+  stoprtc( base );
+
+  checkrev( base );
+
+  now = gettime( base, clock_choice_off( NOW ) );
+  sleep = now + int_delay;
+  wake = sleep + int_down_time;
+
+
+  // Set SLEEP
+  diagprint( "Setting %s to %u...",clock_choice_name( SLEEP ) , sleep );
+  settime( base , clock_choice_off( SLEEP ) , sleep );
+  diagprint( "set.\n");
+
+  // Set WAKE
+  diagprint( "Setting %s to %u...",clock_choice_name( WAKE ) , wake );
+  settime( base , clock_choice_off( WAKE ) , wake );
+  diagprint( "set.\n");
+
+  // Enable power interrupts
+  pwrenable( base );
+
+  // Enable wake interrupt
+  enableinterrupt( base, RTC_INTERRUPTS_IT_ALARM, "ALARM");
+
+  diagprint( "Enable IRQ WAKE ENABLE bit... \n");
+  set32reg( base , RTC_IRQWAKEEN , RTC_IRQWAKEEN_ALARM );
+  diagprint( "enabled.\n");
+
+  // Enable sleep interrupt
+  enableinterrupt( base, RTC_INTERRUPTS_IT_ALARM2, "ALARM2");
+
+  diagprint( "Reading clocks and printing to stdout...\n"  );
+  printf( "NOW: %u\n" , gettime( base , clock_choice_off( NOW ) ) );
+  printf( "SLEEP: %u\n" , gettime( base , clock_choice_off( SLEEP ) ) );
+  printf( "WAKE: %u\n" , gettime( base , clock_choice_off( WAKE ) ) );
+  diagprint( "done.\n");
+
+  startrtc( base );
+  closertc( fd, base );
+
+  return 0;
+
+}
+
 int cmd_dump() {
 
   int fd;
@@ -664,10 +757,15 @@ int main(int argc, char **argv) {
     clock_choice_t clock_choice=NONE;
 
     const char *new_time=NULL;			// new time specified?
+    const char *down_time=NULL;			// new time specified?
+    const char *delay=NULL;			// new time specified?
 
     switch ( argc ) {
+      case 4:
+        delay = argv[3];
       case 3:
         new_time = argv[2];
+        down_time = new_time;
       case 2:
         if (!strcasecmp( argv[1] , "now")) {
             return cmd_now( new_time );
@@ -675,6 +773,8 @@ int main(int argc, char **argv) {
             return cmd_sleep( new_time );
         } else if (!strcasecmp( argv[1] , "wake" )) {
             return cmd_wake( new_time );
+        } else if (!strcasecmp( argv[1] , "long-reset" )) {
+            return cmd_long_reset(down_time, delay);
         } else if (!strcasecmp( argv[1] , "dump" )) {
             return cmd_dump();
         } else if (!strcasecmp( argv[1] , "unlock" )) {
