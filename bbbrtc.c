@@ -8,6 +8,12 @@
 
 */
 
+// Linux 4+ locks the registers we need.
+// Here is the magic for unlocking them.
+#define RTC_KICK0_REG 0x6c
+#define RTC_KICK1_REG 0x70
+#define KICK0_VALUE 0x83e70b13
+#define KICK1_VALUE 0x95a4f1e0
 
 #define RTC_SS_BASE 0x44e3e000L             // Memory base for the RTC registers
 
@@ -89,7 +95,7 @@ void dump( unsigned char *base) {
 
     for(int i=0; i<=0x98;i+=4) {
 
-        fprintf( stdout ,"%02.2x %08.8x\n", i ,  *((unsigned long *) (base+i)) );
+        fprintf( stdout ,"%2.2x %8.8x\n", i ,  *((unsigned long *) (base+i)) );
 
     }
 
@@ -106,6 +112,7 @@ unsigned get32reg( unsigned char *base , unsigned char off) {
     return *( (unsigned *) (base+off));
 
 }
+
 
 // From: https://stackoverflow.com/questions/150543/forward-an-invocation-of-a-variadic-function-in-c
 
@@ -128,6 +135,9 @@ void diagprint( const char *fmt, ... ) {
 
     /* Clean up the va_list */
     va_end(myargs);
+
+    /* always flush... */
+    fflush(stdout);
 }
 
 // Directly print the BCD registers for debuging
@@ -140,6 +150,13 @@ void printtimeregs( unsigned char *base, unsigned char time_offset  ) {
     printf("month %3.3x\n" , get32reg( base , time_offset + TM_HOURS_OFF ) );
     printf("year  %3.3x\n" , get32reg( base , time_offset + TM_YEARS_OFF ) );
 
+}
+
+// Unlock RTC registers in 4.x+ kernels
+void unlockrtcregs( unsigned char *base ) {
+    diagprint("Unlocking Kick Registers\n");
+    set32reg( base, RTC_KICK0_REG, KICK0_VALUE);
+    set32reg( base, RTC_KICK1_REG, KICK1_VALUE);
 }
 
 
@@ -188,14 +205,16 @@ void settime( unsigned char *base, unsigned char time_offset , time_t newtime ) 
 
 void showhelp() {
     diagprint( "Usage:\n");
+    diagprint( "   bbbrtc unlock\n");
     diagprint( "   bbbrtc dump\n");
     diagprint( "   bbbrtc now <new_time>\n");
-    diagprint( "   bbbrtc (sleep|wake) (<new_time>|never)\n");	
+    diagprint( "   bbbrtc (sleep|wake) (<new_time>|never)\n");
+    diagprint( "   bbbrtc long-reset <down_time> <delay>\n");
     diagprint( "\n");
     diagprint( "Where:\n");
     diagprint( "   'bbbrtc dump` dumps the contents of all registers to stdout\n");
     diagprint( "   if <new_time> is present and non-zero, then the specified time is set\n");
-	diagprint( "   if never is specified with sleep or wake, the event is disabled (clock value is left the same)\n");
+    diagprint( "   if never is specified with sleep or wake, the event is disabled (clock value is left the same)\n");
     diagprint( "   time is in seconds since epoch, parsed leniently\n");
     diagprint( "   prints existing or newly set the value of the specified time\n");
     diagprint( "\n");
@@ -203,20 +222,24 @@ void showhelp() {
     diagprint( "   wake should always be later than sleep or you will sleep for 100 years\n");
     diagprint( "   if you sleep without setting a wake then you must push the power button to wake\n");
     diagprint( "\n");
-    diagprint( "times:\n"); 
+    diagprint( "times:\n");
     diagprint( "   always specified in seconds since the epoch Jan 1, 1970\n");
     diagprint( "\n");
     diagprint( "examples:\n");
+    diagprint( "   unlock rtc registers for linux 4+...\n");
+    diagprint( "      bbbrtc unlock\n");
     diagprint( "   set the rtc to the current system clock time...\n");
     diagprint( "      bbbrtc now $(date +%%s)\n");
     diagprint( "   set the system clock to the current rtc time...\n");
     diagprint( "      date -s @$(bbbrtc now)\n");
     diagprint( "   set to sleep 10 seconds from now...\n");
-    diagprint( "      bbbrtc sleep $[$(rtcbbb now)+10])\n");	
+    diagprint( "      bbbrtc sleep $[$(rtcbbb now)+10])\n");
     diagprint( "   set to wake 1 day after we go to sleep ...\n");
     diagprint( "       bbbrtc wake $(date +%%s -d \"$(date -d \"@$(bbbrtc sleep)\") + 1 day\")\n");
     diagprint( "   start a bbbrtc party...\n");
     diagprint( "      bbbrtc now 946684770\n");
+    diagprint( "   go to sleep for 5 seconds 2 seconds from now...\n");
+    diagprint( "      bbbrtc long-reset 5 2\n");
     diagprint( "\n");
     diagprint( "notes:\n");
     diagprint( "   If you want to be able to wake from sleeping, you must turn off the 'off' bit\n");
@@ -244,6 +267,123 @@ void showhelp() {
 
     */
 
+}
+
+int openrtc( int *fd, unsigned char **base ) {
+  diagprint( "Opening /dev/mem...");
+
+  if((*fd = open("/dev/mem", O_RDWR | O_SYNC)) == -1) {
+
+    diagprint( "\nError opening /dev/mem: %s\n",strerror(errno));
+
+    return 1;
+
+  } else {
+
+    diagprint( "opened.\n");
+
+    diagprint( "Mappng in %p..." , RTC_SS_BASE );
+
+    *base = (unsigned char *) mmap(0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, *fd, RTC_SS_BASE );
+
+    if( *base == MAP_FAILED ) {
+
+      fprintf( stderr ,"\nError mmapping /dev/mem: %s\n",strerror(errno));
+
+      close( *fd );
+
+      return 1;
+
+    } else {
+
+      diagprint( "mapped at address %p.\n", *base);
+
+      return 0;
+
+    }
+  }
+}
+
+void closertc( int fd, unsigned char *base ) {
+  diagprint( "Unmaping memory block...");
+
+  munmap( base, MAP_SIZE );
+
+  diagprint( "unmaped.\n");
+
+  diagprint( "Closing fd...");
+
+  close(fd);
+
+  diagprint( "closed.\n");
+}
+
+// signal RTC to start and wait for it's status to change
+void startrtc( unsigned char *base ) {
+  diagprint( "Starting RTC...\n");
+
+  set32reg( base  , RTC_CTRL_REG ,  RTC_CTRL_STOP);       // Write a 1 to bit 0 to start the RTC
+
+  diagprint( "waiting for it to start..." );
+
+  do {
+
+      unsigned int wait_counter=0;
+
+      while ( !( get32reg( base , RTC_STATUS_REG)  & RTC_STATUS_RUN ) ) wait_counter++;
+
+      diagprint( "took %u tries.\n",wait_counter);
+
+  } while (0);
+}
+
+// signal RTC to stop and wait for its status to change
+void stoprtc( unsigned char *base ) {
+  diagprint( "Stopping RTC...");
+
+  set32reg( base , RTC_CTRL_REG ,  0x00);     // Write a 0 to bit 0 to freeze the RTC so we can update regs
+
+  diagprint( "waiting for stop...");
+
+  do {
+      unsigned int wait_counter=0;
+
+      while ( get32reg( base , RTC_STATUS_REG)  & RTC_STATUS_RUN ) wait_counter++;
+
+      diagprint( "took %u tries.\n",wait_counter);
+
+  } while (0);
+}
+
+void checkrev( unsigned char *base ) {
+
+  diagprint("Checking RTC chip rev...");
+
+  if ( get32reg( base , RTC_REVISION ) != RTC_REVISION_MAGIC ) {
+
+      diagprint("\nWARNING: The revision on the RTC is %x, should be %x\n" , get32reg( base , RTC_REVISION ) , RTC_REVISION_MAGIC  );
+      diagprint("This program is only expected to work on an AM355x processor!\n");
+  } else {
+      diagprint("checks good.\n");
+  }
+}
+
+void pwrenable( unsigned char *base ) {
+  diagprint( "Enable PWR_ENABLE_EN to be controlled ON->OFF by interrupts...\n");
+  set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN );
+  diagprint( "enabled.\n");
+}
+
+void enableinterrupt( unsigned char *base, unsigned alarm, const char *name ) {
+  diagprint( "Enable %s interrupt bit... ", name);
+  set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  alarm );
+  diagprint( "enabled.\n");
+}
+
+void disableinterrupt( unsigned char *base, unsigned alarm, const char *name ) {
+  diagprint( "Disable %s interrupt bit... ", name);
+  set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) &  ~alarm );
+  diagprint( "disabled.\n");
 }
 
 enum clock_choice_t  { NONE , NOW, SLEEP , WAKE };
@@ -289,240 +429,363 @@ const char *clock_choice_name( clock_choice_t clock_choice ) {
 
 }
 
-int dumpflag=0;     // Are we doing a dump?
+int cmd_now( const char *new_time ) {
+  clock_choice_t clock_choice=NOW;
+
+  int fd;
+
+  unsigned char *base;
+
+  char *notn;
+  unsigned set_value;
+
+  if ( new_time ) {
+    set_value = (unsigned) strtoul( new_time , &notn , 10 );
+    if ( notn == new_time ){
+      diagprint("\nERROR: New time must be a number.\n");
+      return 1;
+    }
+  }
+
+  // Open RTC
+  if ( openrtc(&fd, &base) != 0 ){
+    return 1;
+  }
+
+
+  // We can not guarantee being able to access regs in the 15us not busy window under linux, so
+  // instead we stop the whole RTC and the restart it when done.
+  // We will drop some time each time, but not much.
+
+  stoprtc( base );
+
+  checkrev( base );
+
+  if (new_time) {         // Are we setting a new time?
+
+    diagprint( "Setting %s to %u...",clock_choice_name( clock_choice ) , set_value );
+    settime( base , clock_choice_off( clock_choice ) , set_value );
+    diagprint( "set.\n");
+
+    //printtimeregs( base , clock_choice_off(clock_choice ) );
+  }
+
+  diagprint( "Reading %s and printing to stdout...\n",clock_choice_name( clock_choice)  );
+  printf( "%u\n" , gettime( base , clock_choice_off( clock_choice) ) );
+  diagprint( "done.\n");
+
+  startrtc( base );
+  closertc( fd, base );
+
+  return 0;
+
+}
+
+int cmd_sleep( const char *new_time ) {
+  clock_choice_t clock_choice=SLEEP;
+
+  int fd;
+
+  unsigned char *base;
+
+  char *notn;
+  unsigned set_value;
+
+  if ( new_time ) {
+    set_value = (unsigned) strtoul( new_time , &notn , 10 );
+    if ( (notn == new_time ) && ( strcasecmp( new_time , "never" ) != 0 ) ){
+      diagprint("\nERROR: New time must be a number or \"never\".\n");
+      return 1;
+    }
+  }
+
+  // Open RTC
+  if ( openrtc(&fd, &base) != 0 ){
+    return 1;
+  }
+
+
+  // We can not guarantee being able to access regs in the 15us not busy window under linux, so
+  // instead we stop the whole RTC and the restart it when done.
+  // We will drop some time each time, but not much.
+
+  stoprtc( base );
+
+  checkrev( base );
+
+  if (new_time) {         // Are we setting a new time?
+
+    if ( strcasecmp( new_time , "never" ) == 0 ) {
+      // Disable interrupt
+      disableinterrupt( base, RTC_INTERRUPTS_IT_ALARM2, "ALARM2");
+    } else {
+      // Set SLEEP
+      diagprint( "Setting %s to %u...",clock_choice_name( clock_choice ) , set_value );
+      settime( base , clock_choice_off( clock_choice ) , set_value );
+      diagprint( "set.\n");
+
+      // Enable interrupt
+      pwrenable( base );
+
+      enableinterrupt( base, RTC_INTERRUPTS_IT_ALARM2, "ALARM2");
+    }
+    //printtimeregs( base , clock_choice_off(clock_choice ) );
+  }
+
+  diagprint( "Reading %s and printing to stdout...\n",clock_choice_name( clock_choice)  );
+  printf( "%u\n" , gettime( base , clock_choice_off( clock_choice) ) );
+  diagprint( "done.\n");
+
+  startrtc( base );
+  closertc( fd, base );
+
+  return 0;
+
+}
+
+int cmd_wake( const char *new_time ) {
+  clock_choice_t clock_choice=WAKE;
+
+  int fd;
+
+  unsigned char *base;
+
+  char *notn;
+  unsigned set_value;
+
+  if ( new_time ) {
+    set_value = (unsigned) strtoul( new_time , &notn , 10 );
+    if ( (notn == new_time ) && ( strcasecmp( new_time , "never" ) != 0 ) ){
+      diagprint("\nERROR: New time must be a number or \"never\".\n");
+      return 1;
+    }
+  }
+
+  // Open RTC
+  if ( openrtc(&fd, &base) != 0 ){
+    return 1;
+  }
+
+
+  // We can not guarantee being able to access regs in the 15us not busy window under linux, so
+  // instead we stop the whole RTC and the restart it when done.
+  // We will drop some time each time, but not much.
+
+  stoprtc( base );
+
+  checkrev( base );
+
+  if (new_time) {         // Are we setting a new time?
+
+    if ( strcasecmp( new_time , "never" ) == 0 ) {
+      // Disable interrupt
+      disableinterrupt( base, RTC_INTERRUPTS_IT_ALARM, "ALARM");
+
+      diagprint( "Disable IRQ WAKE ENABLE bit... \n");
+      set32reg( base , RTC_IRQWAKEEN , get32reg( base , RTC_IRQWAKEEN ) & ~RTC_IRQWAKEEN_ALARM );
+      diagprint( "disabled.\n");
+    } else {
+      // Set SLEEP
+      diagprint( "Setting %s to %u...",clock_choice_name( clock_choice ) , set_value );
+      settime( base , clock_choice_off( clock_choice ) , set_value );
+      diagprint( "set.\n");
+
+      // Enable interrupt
+      pwrenable( base );
+
+      enableinterrupt( base, RTC_INTERRUPTS_IT_ALARM, "ALARM");
+
+      diagprint( "Enable IRQ WAKE ENABLE bit... \n");
+      set32reg( base , RTC_IRQWAKEEN , RTC_IRQWAKEEN_ALARM );
+      diagprint( "enabled.\n");
+    }
+    //printtimeregs( base , clock_choice_off(clock_choice ) );
+  }
+
+  diagprint( "Reading %s and printing to stdout...\n",clock_choice_name( clock_choice)  );
+  printf( "%u\n" , gettime( base , clock_choice_off( clock_choice) ) );
+  diagprint( "done.\n");
+
+  startrtc( base );
+  closertc( fd, base );
+
+  return 0;
+
+}
+
+int cmd_long_reset( const char *down_time, const char *delay ) {
+  clock_choice_t clock_choice=WAKE;
+
+  int fd;
+
+  unsigned char *base;
+
+  char *notn;
+  // inputs
+  unsigned int_down_time;
+  unsigned int_delay;
+
+  // clock values
+  unsigned now;
+  unsigned sleep;
+  unsigned wake;
+
+  if ( down_time ) {
+    int_down_time = (unsigned) strtoul( down_time , &notn , 10 );
+    diagprint("\nERROR: Down time must be a number.\n");
+    return 1;
+  } else {
+    diagprint("\nERROR: Missing required argument \"down_time\".\n");
+    return 1;
+  }
+
+  if ( delay ) {
+    int_delay = (unsigned) strtoul( delay , &notn , 10 );
+    diagprint("\nERROR: Delay must be a number.\n");
+    return 1;
+  } else {
+    diagprint("\nERROR: Missing required argument \"delay\".\n");
+    return 1;
+  }
+
+  // Open RTC
+  if ( openrtc(&fd, &base) != 0 ){
+    return 1;
+  }
+
+
+  // We can not guarantee being able to access regs in the 15us not busy window under linux, so
+  // instead we stop the whole RTC and the restart it when done.
+  // We will drop some time each time, but not much.
+
+  stoprtc( base );
+
+  checkrev( base );
+
+  now = gettime( base, clock_choice_off( NOW ) );
+  sleep = now + int_delay;
+  wake = sleep + int_down_time;
+
+
+  // Set SLEEP
+  diagprint( "Setting %s to %u...",clock_choice_name( SLEEP ) , sleep );
+  settime( base , clock_choice_off( SLEEP ) , sleep );
+  diagprint( "set.\n");
+
+  // Set WAKE
+  diagprint( "Setting %s to %u...",clock_choice_name( WAKE ) , wake );
+  settime( base , clock_choice_off( WAKE ) , wake );
+  diagprint( "set.\n");
+
+  // Enable power interrupts
+  pwrenable( base );
+
+  // Enable wake interrupt
+  enableinterrupt( base, RTC_INTERRUPTS_IT_ALARM, "ALARM");
+
+  diagprint( "Enable IRQ WAKE ENABLE bit... \n");
+  set32reg( base , RTC_IRQWAKEEN , RTC_IRQWAKEEN_ALARM );
+  diagprint( "enabled.\n");
+
+  // Enable sleep interrupt
+  enableinterrupt( base, RTC_INTERRUPTS_IT_ALARM2, "ALARM2");
+
+  diagprint( "Reading clocks and printing to stdout...\n"  );
+  printf( "NOW: %u\n" , gettime( base , clock_choice_off( NOW ) ) );
+  printf( "SLEEP: %u\n" , gettime( base , clock_choice_off( SLEEP ) ) );
+  printf( "WAKE: %u\n" , gettime( base , clock_choice_off( WAKE ) ) );
+  diagprint( "done.\n");
+
+  startrtc( base );
+  closertc( fd, base );
+
+  return 0;
+
+}
+
+int cmd_dump() {
+
+  int fd;
+
+  unsigned char *base;
+
+  // Open RTC
+  if ( openrtc(&fd, &base) != 0 ){
+    return 1;
+  }
+
+
+  // We can not guarantee being able to access regs in the 15us not busy window under linux, so
+  // instead we stop the whole RTC and the restart it when done.
+  // We will drop some time each time, but not much.
+
+  stoprtc( base );
+
+  checkrev( base );
+
+  dump(base);
+
+  startrtc( base );
+  closertc( fd, base );
+
+  return 0;
+
+}
+
+int cmd_unlock() {
+
+  int fd;
+
+  unsigned char *base;
+
+  // Open RTC
+  if ( openrtc(&fd, &base) != 0 ){
+    return 1;
+  }
+
+  // Unlock registers
+  unlockrtcregs( base );
+
+  closertc( fd, base );
+
+  return 0;
+
+}
 
 int main(int argc, char **argv) {
 
     clock_choice_t clock_choice=NONE;
-	
+
     const char *new_time=NULL;			// new time specified?
+    const char *down_time=NULL;			// new time specified?
+    const char *delay=NULL;			// new time specified?
 
-    if (argc >= 2) {
-
+    switch ( argc ) {
+      case 4:
+        delay = argv[3];
+      case 3:
+        new_time = argv[2];
+        down_time = new_time;
+      case 2:
         if (!strcasecmp( argv[1] , "now")) {
-            clock_choice = NOW;
+            return cmd_now( new_time );
         } else if (!strcasecmp( argv[1] , "sleep")) {
-            clock_choice = SLEEP;
+            return cmd_sleep( new_time );
         } else if (!strcasecmp( argv[1] , "wake" )) {
-            clock_choice = WAKE;
+            return cmd_wake( new_time );
+        } else if (!strcasecmp( argv[1] , "long-reset" )) {
+            return cmd_long_reset(down_time, delay);
         } else if (!strcasecmp( argv[1] , "dump" )) {
-            dumpflag=1;
-        }
-
-        if (argc>= 3 ) {
-
-            new_time = argv[2]; 
-
-        }
-
-    }
-
-
-    if ( clock_choice == NONE && !dumpflag ) {          // Bad params
-
-            showhelp();
-
-    } else {
-
-        // HERE IS THE BEEF
-
-        int fd;
-
-        diagprint( "Opening /dev/mem...");
-        fflush(stdout);
-
-        if((fd = open("/dev/mem", O_RDWR | O_SYNC)) == -1) {
-
-            diagprint( "Error opening /dev/mem:%s",strerror(errno));
-
+            return cmd_dump();
+        } else if (!strcasecmp( argv[1] , "unlock" )) {
+            return cmd_unlock();
         } else {
-
-            diagprint( "opened.\n");
-
-            diagprint( "Mappng in %p..." , RTC_SS_BASE );
-            fflush(stdout);
-
-            unsigned char *base;
-
-            base = (unsigned char *) mmap(0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, RTC_SS_BASE );
-
-            if( base == MAP_FAILED ) {
-
-                fprintf( stderr ,"Error mmapping /dev/mem:%s",strerror(errno));
-
-            } else {
-
-                diagprint( "mapped at address %p.\n", base);
-                fflush(stdout);
-
-
-                // We can not guarantee being able to access regs in the 15us not busy window under linux, so
-                // instead we stop the whole RTC and the restart it when done.
-                // We will drop some time each time, but not much.
-
-
-                diagprint( "Stopping RTC...");
-                fflush(stdout);
-
-                set32reg( base , RTC_CTRL_REG ,  0x00);     // Write a 0 to bit 0 to freeze the RTC so we can update regs
-
-                diagprint( "waiting for stop...");
-                fflush(stdout);
-
-                do {
-                    unsigned int wait_counter=0;
-
-                    while ( get32reg( base , RTC_STATUS_REG)  & RTC_STATUS_RUN ) wait_counter++;
-
-                    diagprint( "took %u tries.\n",wait_counter);
-                    fflush(stdout);
-
-                } while (0);
-
-                diagprint("Checking RTC chip rev...");
-
-                if ( get32reg( base , RTC_REVISION ) != RTC_REVISION_MAGIC ) {
-
-                    diagprint("WARNING: The revision on the RTC is %x, should be %x\n" , get32reg( base , RTC_REVISION ) , RTC_REVISION_MAGIC  );
-                    diagprint("This program is only expected to work on an AM355x processor!\n");
-                } else {
-                    diagprint("checks good.\n");
-                }
-
-                if (dumpflag) {
-
-                    dump(base);
-
-                } else {
-
-                    //printtimeregs( base , clock_choice_off(clock_choice ) );
-
-                    if (new_time) {         // Are we setting a new time?
-					
-					
-						if (!strcasecmp( new_time , "never") ) {
-							
-						
-							//printtimeregs( base , clock_choice_off(clock_choice ) );
-
-
-							if ( clock_choice == SLEEP ) {
-
-								diagprint( "Disable ALARM2 interrupt bit... \n");
-								set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) &  ~RTC_INTERRUPTS_IT_ALARM2 );
-								diagprint( "disabled.\n");
-
-
-							} else if (clock_choice == WAKE ) {
-
-								diagprint( "Disable ALARM interrupt bit... \n");
-								set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) &  !RTC_INTERRUPTS_IT_ALARM );
-								diagprint( "disabled.\n");
-
-								diagprint( "Disable IRQ WAKE ENABLE bit... \n");
-								set32reg( base , RTC_IRQWAKEEN , get32reg( base , RTC_IRQWAKEEN ) & ~RTC_IRQWAKEEN_ALARM );
-								diagprint( "disabled.\n");
-
-							}	
-							
-						} else {		// Set new time...
-						
-							unsigned set_value = (unsigned) strtoul( new_time , NULL , 10 );
-
-							diagprint( "Setting %s to %u...",clock_choice_name( clock_choice) , set_value );
-							settime( base , clock_choice_off( clock_choice) , set_value );
-							diagprint( "set.\n");
-
-							//printtimeregs( base , clock_choice_off(clock_choice ) );
-
-
-							if ( clock_choice == SLEEP ) {
-
-								diagprint( "Enable PWR_ENABLE_EN to be controlled ON->OFF by ALARM2...\n");
-								set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN );
-								diagprint( "enabled.\n");
-
-								diagprint( "Enable ALARM2 interrupt bit... \n");
-								set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM2 );
-								diagprint( "enabled.\n");
-
-
-							} else if (clock_choice == WAKE ) {
-
-								diagprint( "Enable PWR_ENABLE_EN to be controlled OFF->ON by ALARM...\n");
-								set32reg( base , RTC_PMIC , RTC_PMIC_PWN_ENABLE_EN );
-								diagprint( "enabled.\n");
-
-								diagprint( "Enable ALARM interrupt bit... \n");
-								set32reg( base , RTC_INTERRUPTS_REG , get32reg( base , RTC_INTERRUPTS_REG ) |  RTC_INTERRUPTS_IT_ALARM );
-								diagprint( "enabled.\n");
-
-								diagprint( "Enable IRQ WAKE ENABLE bit... \n");
-								set32reg( base , RTC_IRQWAKEEN , RTC_IRQWAKEEN_ALARM );
-								diagprint( "enabled.\n");
-
-							} else {
-								
-								diagprint("WARNING: never does not really make sense here! Nothing done!\n");								
-								
-							}
-						}
-
-                    }
-
-                    diagprint( "Reading %s and printing to stdout...\n",clock_choice_name( clock_choice)  );
-                    printf( "%u\n" , gettime( base , clock_choice_off( clock_choice) ) );
-                    diagprint( "done.\n");
-                }
-
-                diagprint( "Restarting RTC...");
-
-                set32reg( base  , RTC_CTRL_REG ,  RTC_CTRL_STOP);       // Write a 1 to bit 0 to start the RTC
-
-                diagprint( "waiting for it to start..." );
-
-                do {
-
-                    unsigned int wait_counter=0;
-
-                    while ( !( get32reg( base , RTC_STATUS_REG)  & RTC_STATUS_RUN ) ) wait_counter++;
-
-                    diagprint( "took %u tries.\n",wait_counter);
-                    fflush(stdout);
-
-                } while (0);
-
-
-                diagprint( "Unmaping memory block...");
-
-                munmap( base, MAP_SIZE );
-
-                diagprint( "unmaped.\n");
-
-            }
-
-            diagprint( "Closing fd...");
-
-            close(fd);
-
-            diagprint( "closed.\n");
-
+          showhelp();
+          return 1;
         }
-
+        break;
+      default:
+        showhelp();
+        return 1;
     }
-
-
-    return 0;
-
-    /* Clear stuff
-
-    #clear INT regs
-    devmem2 0x44e3e048 W 0x00
-    #status regs
-    devmem2 0x44e3e044 W 0xC2
-    #wake enable
-    devmem2 0x44e3e07c W 0x00
-
-
-     */
 }
