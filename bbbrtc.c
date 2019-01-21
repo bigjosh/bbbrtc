@@ -632,8 +632,10 @@ int cmd_long_reset( const char *down_time, const char *delay ) {
 
   if ( down_time ) {
     int_down_time = (unsigned) strtoul( down_time , &notn , 10 );
-    diagprint("\nERROR: Down time must be a number.\n");
-    return 1;
+    if ( notn == down_time ){
+      diagprint("\nERROR: Down time must be a number.\n");
+      return 1;
+    }
   } else {
     diagprint("\nERROR: Missing required argument \"down_time\".\n");
     return 1;
@@ -641,8 +643,10 @@ int cmd_long_reset( const char *down_time, const char *delay ) {
 
   if ( delay ) {
     int_delay = (unsigned) strtoul( delay , &notn , 10 );
-    diagprint("\nERROR: Delay must be a number.\n");
-    return 1;
+    if ( notn == delay ){
+      diagprint("\nERROR: Delay must be a number.\n");
+      return 1;
+    }
   } else {
     diagprint("\nERROR: Missing required argument \"delay\".\n");
     return 1;
